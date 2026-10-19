@@ -1,77 +1,78 @@
 # durable-personal-agent
 
-One assistant brain on my Cloudflare account. It remembers what I tell it, keeps time for me, and reads
-links I forward. Two doors, same conversation: **Telegram** on the phone, and **`pi` in my terminal** over
-MCP. No app, no dashboard, no tab to open.
-
-It is not a digital employee. It never sends email, books anything, or acts in my accounts. It reads the
-web when asked, writes notes, and speaks on schedule. That boundary is deliberate, and it is the reason
-the tool list is as short as it is.
+One assistant brain on your Cloudflare account. It remembers what you tell it, keeps time for you, and reads
+links you forward. Two doors, one conversation: Telegram on your phone, and `pi` in your terminal over MCP.
+No app to install and no dashboard to check.
 
 ```
-Telegram ──┐  secret + chat-ID allowlist   ┌─ Assistant (one Durable Object, named "adam")
-           ├───────────────────────────────┤   Pi Durable transcript · SQLite notes
-pi (MCP) ──┘  bearer token → tool mount    ┘   schedules that fire with nothing of mine running
+Telegram ─┐ secret + chat-ID allowlist    ┌─ Assistant (one Durable Object)
+          ├───────────────────────────────┤   transcript · SQLite notes · alarms
+pi (MCP)  ┘ bearer token                  ┘
 ```
 
 ## What you get
 
-| | |
+| Tool | |
 |---|---|
-| **remember** | Notes, written once and searchable years later. Retried writes land once, not twice. |
-| **recall** | Raw matching lines, straight from SQLite. Never costs a model call. |
-| **ask** | A real answer, reasoned from the notes. The one tool that costs an agent turn. |
-| **schedule** | One-off and recurring, delivered to Telegram from a Durable Object alarm. List and cancel. |
-| **fetch_page** | Reads a URL, truncates it, and fences it as data so a hostile page can't speak as me. |
-| **forget** | Wipes every note and plan. Refuses to run without `confirm: "ERASE"`, and isn't offered to the read-only mount. |
-| **Two doors, one thread** | Ask from the terminal, continue from the phone. Same transcript, same memory. |
+| `remember` | Notes, written once, searchable years later. A retried write lands once, not twice. |
+| `recall` | Matching lines straight from SQLite. Costs no model call. |
+| `ask` | A reasoned answer drawn from your notes. The only tool that costs an agent turn. |
+| `schedule` | One-off and recurring reminders, delivered by a Durable Object alarm with nothing of yours running. Lists and cancels. |
+| `fetch_page` | Reads a URL and returns fenced text, so a hostile page cannot speak as you. |
+| `forget` | Wipes every note and plan. Requires `confirm: "ERASE"`. |
+
+Both doors write the same thread, so you can ask from the terminal and continue from the phone. The brain
+reads, writes notes, and talks on schedule. It holds no credentials in your accounts and cannot run code.
+
+A second optional token, `BRAIN_READ_ONLY_TOKEN`, exposes `recall` and nothing else. That is the mount you
+would attach to ChatGPT or Claude through their custom-server endpoints. `ask` cannot be read-only: it runs a
+brain turn, and that turn holds write tools.
 
 ## Setup
 
-Node 22+, a Cloudflare account (free tier is enough — you spend only on inference), a Telegram bot, and a
-Callstack API key.
+You need Node 22+, a Cloudflare account on the free tier, a Telegram bot, and any OpenAI-compatible chat
+endpoint. Your only spend is inference.
 
-### 1. Install and check
+### 1. Install
 
 ```sh
 npm install
 npm run check
 ```
 
-`package.json` pins `@aws-sdk/credential-provider-http` to `3.972.76`. `pi-ai` pulls the AWS SDK for
-Bedrock, and upstream published a `3.972.77` that is listed on the registry but whose tarball returns 404 —
-without the pin, `npm install` fails for reasons that have nothing to do with this project. Delete the
-`overrides` block once `3.972.77` resolves.
+`package.json` pins `@aws-sdk/credential-provider-http` to `3.972.76` because `pi-ai` pulls in the AWS SDK
+for Bedrock, and upstream published a `3.972.77` whose tarball returns 404. Without the pin, `npm install`
+fails for reasons unrelated to this project. Delete the `overrides` block once that tarball resolves.
 
-### 2. Collect the five secrets
+### 2. Collect your values
 
-**Telegram** — message [@BotFather](https://t.me/BotFather): `/newbot`, keep the token it prints. Then
-message your new bot once from your phone and open:
+Start with the model. `MODEL_ID` goes on the wire unchanged, so use whatever string your endpoint expects,
+and set `MODEL_BASE_URL` to its root, usually ending in `/v1`.
+
+For Telegram, message [@BotFather](https://t.me/BotFather) with `/newbot` and keep the token it returns. Then
+message your bot once from your phone and open this, which is also how you find your chat ID:
 
 ```
 https://api.telegram.org/bot<TOKEN>/getUpdates
 ```
 
-Your number under `chat.id` is your chat ID. Nobody else's message will be answered.
+The number at `chat.id` is your chat ID. The brain answers that chat and ignores every other one.
 
-**Model** — an `api.callstack.ai` key. If you use a different OpenAI-compatible endpoint, change `baseUrl`,
-`MODEL_ID` and `contextWindow` at the top of [`src/model.ts`](src/model.ts).
-
-**Two random strings** — the MCP token and the webhook secret:
+Generate two random strings:
 
 ```sh
 openssl rand -hex 32   # BRAIN_TOKEN
 openssl rand -hex 24   # TELEGRAM_WEBHOOK_SECRET
 ```
 
-### 3. Try it locally
+### 3. Run it locally
 
 ```sh
 cp .dev.vars.example .dev.vars   # fill in the values above
 npm run dev
 ```
 
-Then, in another terminal — substituting the `BRAIN_TOKEN` value you just put in `.dev.vars`:
+In another terminal, with your `BRAIN_TOKEN`:
 
 ```sh
 curl -s localhost:8787/health
@@ -82,155 +83,105 @@ curl -s localhost:8787/mcp -X POST \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-Expected: `/health` answers `{"brain":"adam"}`, the MCP call lists all six tools, and dropping the header
-gives **401**. Notes written here go to local simulated storage only; deploying starts an empty brain.
+`/health` returns `{"brain":"brain"}`, the MCP call lists six tools, and removing the header returns 401.
+Local notes live in simulated storage, so deploying starts with an empty brain.
 
-### 4. Secrets, then deploy
+### 4. Set your vars and secrets, then deploy
+
+Edit `MODEL_BASE_URL` and `MODEL_ID` in `wrangler.jsonc`. They are plain vars rather than secrets because
+neither is sensitive, and a deploy carries them. Locally, `.dev.vars` overrides them, which is the easiest
+way to try a second provider without touching committed config.
 
 ```sh
 npx wrangler login
 
-npx wrangler secret put CALLSTACK_API_KEY
+npx wrangler secret put MODEL_API_KEY
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_CHAT_ID
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put BRAIN_TOKEN
 
-npx wrangler secret list          # confirm all five are there
+npx wrangler secret list
 npx wrangler deploy
 ```
 
-Each `secret put` prompts for the value and, as a side effect, publishes a new Worker version — which is why
-they go **before** `deploy`, so the first version that serves traffic is already configured. **Set them once:
-secrets live on the Worker, not on a version, and every later `wrangler deploy` keeps them.** Set the
-optional `BRAIN_READ_ONLY_TOKEN` the same way if you want the read-only mount.
+Each `secret put` prompts for a value and publishes a worker version as a side effect, so set them before
+`deploy` and the first version serving traffic is already configured. Secrets live on the worker rather than
+on a version, so you set them once and later deploys keep them.
 
-The first deploy needs `migrations: [{ tag: "v1", new_sqlite_classes: ["Assistant"] }]`, already in
-[`wrangler.jsonc`](wrangler.jsonc) — without it the Worker deploys and then fails at runtime with *"no such
-Durable Object class"*. Never edit an old migration tag; add a new one.
+The first deploy needs `migrations: [{ tag: "v1", new_sqlite_classes: ["Assistant"] }]`, which is already in
+`wrangler.jsonc`. Without it the worker deploys cleanly and then fails at runtime with "no such Durable
+Object class". Never edit an old migration tag, add a new one.
 
-### 5. Prove it's live
+### 5. Prove it is live
 
 ```sh
-curl -s https://<your-worker>.workers.dev/health    # {"brain":"adam"}
-npx wrangler tail                                   # leave this open while you test
+curl -s https://<your-worker>.workers.dev/health
+npx wrangler tail
 ```
 
-`wrangler tail` is the only window into the brain — every model failure and rejected webhook shows there
-and nowhere else. Note the Worker may need a minute to be reachable on `workers.dev` the first time.
+`wrangler tail` is the only place you will see a model error or a rejected webhook, so leave it open while
+you test. A new worker can take a minute to answer on `workers.dev`.
 
-### 6. Wire up Telegram
+### 6. Point Telegram at it
 
 ```sh
 ./scripts/set-webhook.sh
 ```
 
-It sets the webhook URL and the shared secret in one call. Send your bot a message:
+Then send your bot this:
 
 > remember that the garage code is 4417
 
-The reply is sent **once**, never edited — no fake streaming, no edit-as-typewriter walking into Telegram's
-flood control.
+The reply arrives once and never gets edited afterward.
 
-### 7. Wire up your terminal
+### 7. Add it to pi
 
 ```sh
 pi mcp add brain --url https://<your-worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
 ```
 
-That writes to `~/.pi/agent/mcp.json` — **user level, deliberately.** A project's `.pi/mcp.json` is skipped
-silently for untrusted folders, and a same-named project entry *replaces* the user one. Add this to the
-`brain` entry to skip a discovery round-trip and get the cheap exposure:
+That writes to `~/.pi/agent/mcp.json`. Keep it there. Pi silently skips a project-level `.pi/mcp.json` in
+untrusted folders, and a same-named project entry replaces your user one. Add these keys to the `brain` entry
+to skip a discovery round trip:
 
 ```jsonc
-"description": "The adam brain — use for anything about adam: his notes, schedule, decisions.",
+"description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",
 "toolExposure": {
   "ask": "direct", "remember": "direct", "schedule": "direct",
   "recall": "codemode", "fetch_page": "codemode"
 }
 ```
 
-`description` is load-bearing: pi puts MCP server `instructions` in *no* tool description, so this string is
-the only thing a model reads before deciding to call the brain at all.
+`description` matters more than it looks, because pi puts MCP server instructions in no tool description.
+This string is the only thing a model reads before deciding whether to call the brain at all.
 
-⚠ **If you use a permission gate in pi** (e.g. `pi-permission-system`): every MCP call runs through pi's
-tool pipeline, and non-interactive runs (`pi -p`, `--mode json`, any background pane) answer *"requires
-approval, but no interactive UI is available"* forever. **Allowlist `brain_*`** or headless runs get a
-polite non-answer every time.
+If you run a permission gate in pi, such as `pi-permission-system`, allowlist `brain_*`. Every MCP call goes
+through pi's tool pipeline, and a non-interactive run cannot approve one. Until you allowlist them, headless
+calls (`pi -p`, `--mode json`, background panes) answer "requires approval, but no interactive UI is
+available" every time.
 
-## Two mounts, one brain
+### Optional vars
 
-`BRAIN_TOKEN` unlocks everything. `BRAIN_READ_ONLY_TOKEN` (optional, unset by default) unlocks **`recall`
-only**.
+Put these in `wrangler.jsonc` under `vars`, or in `.dev.vars` while developing.
 
-That read-only mount exists for a future I haven't chosen: ChatGPT, Claude and Gemini all accept a custom
-MCP URL today, so the day curiosity wins, the worst a stranger's model can do to my notes is read one — not
-write a permanent note that sounds like me.
+| Var | Default | |
+|---|---|---|
+| `MODEL_CONTEXT_WINDOW` | `128000` | Lower it if your endpoint caps below what it advertises. |
+| `MODEL_MAX_TOKENS` | `8192` | Completion cap. Over-declaring against a real ceiling fails at request time. |
+| `MODEL_REASONING` | unset | Set `true` when the endpoint returns reasoning deltas. |
+| `BRAIN_NAME` | `brain` | Also names the Durable Object. Changing it starts an empty brain. |
+| `TIMEZONE` | `UTC` | Used for the clock in the brain's prompt and for scheduled times. |
+| `BRAIN_HOSTNAME` | unset | Set once you serve a custom hostname, so MCP host validation accepts it. |
 
-**`ask` is not on that list, and never will be.** It hands the prompt to the brain, and the brain runs with
-its full tool registry — `PiSubmitOptions` cannot restrict tools for a single turn. An `ask` answer comes
-back from an agent that can write, however much it reads like a question.
-
-## Layout
-
-Seven small modules and one type declaration, ~560 lines. Everything else is reused: Pi Durable for the
-agent loop, `PiHarness` to host it in a Durable Object, the Agents SDK's MCP handler, Telegram's Bot API
-over plain `fetch`.
-
-| File | |
-|---|---|
-| `src/index.ts` | Two routes and both guards |
-| `src/assistant.ts` | The brain: `PiHarness`, turns, plans |
-| `src/tools.ts` | The four tools the brain sees, and `defang` |
-| `src/store.ts` | Notes and plans in SQLite — shared by both doors |
-| `src/door.ts` | MCP mount and the bearer-token choice |
-| `src/telegram.ts` | Send, with Telegram's 4096-char split |
-| `src/model.ts` | Apex, direct |
-
-Writes from the terminal are **direct SQLite**, not a turn through the brain: storing a note costs ~80
-tokens and grows nobody's transcript. `ask` is the metered one.
-
-The `forget` tool (trusted mount only) wipes every note and plan — it refuses to run unless you pass
-`confirm: "ERASE"`, and it isn't offered to the read-only mount.
-
-## Day two
+## After the first deploy
 
 ```sh
-npx wrangler deploy            # every code change; the DO restarts, its SQLite does not
+npx wrangler deploy            # every code change
 npx wrangler tail              # live errors
-npx wrangler deployments list  # and rollback in the dashboard if a deploy is bad
+npx wrangler deployments list  # roll back from the dashboard if a deploy is bad
 ```
 
-A deploy restarts every running Durable Object but keeps its storage, so notes and schedules survive and an
-in-flight turn simply resumes. To wipe the brain's memory, use the `forget` tool above, or delete the
-object's data at *Workers → Durable Objects → Assistant → adam*.
-
-## Known rough edges
-
-Honest list, not a bug hunt:
-
-- **`ask` waits 90 s, then gives up politely.** If the brain runs longer, you get "still working" and the
-  answer lands in Telegram instead. Recurring `ask` from a script will feel like this.
-- **A scheduled reminder that the brain takes longer than 4 minutes to answer arrives as a plain
-  `Reminder:` line** instead of its usual reasoned one. The turn still finishes; only the delivery changes.
-- **`remember` from the terminal generates a fresh batch key each call,** so retrying the same MCP request
-  can store the note twice. The brain's own writes are keyed on the call and don't have this problem.
-- **`fetch_page` strips tags with a regex.** Good enough for the pages I forward, not a parser.
-- **No images, no voice.** A forwarded photo arrives and is ignored; voice notes arrive as audio and are
-  ignored. First real bolt-on when that hurts.
-- **`PiHarness` is beta** ("will likely change"). The seam is only in `assistant.ts`, on purpose.
-
-## Credits
-
-Borrowed, not rewritten, because that's cheaper:
-
-- [`xiaomoBoy/pi-durable-edge`](https://github.com/xiaomoBoy/pi-durable-edge) (MIT) — the `PiHarness`
-  construction shape and the conservative `compat` flags on the model.
-- [`TannerMidd/pi-pocket`](https://github.com/TannerMidd/pi-pocket) (MIT) — `defang` in `tools.ts` (its
-  invisible-character evasion handling, verbatim), the `${taskId}:${callId}` dedupe key, and the
-  add/list/cancel `schedule` tool shape.
-- [`earendil-works/pi-durable`](https://github.com/earendil-works/pi-durable) — the harness itself.
-
-Not built here on purpose, and please don't add them back without a reason: any UI, ChatStorage,
-Cloudflare Access, bash or any code execution, multi-user scopes, subagents, voice, photo ingestion. Every
-one was considered and cut; the reasoning lives in my local `pi-assistant-plan/PLAN.md`, not in this repo.
+A deploy restarts the Durable Object and keeps its storage, so notes and schedules survive and a turn that
+was mid-flight resumes. To clear the brain's memory, call `forget` or delete the object under Workers →
+Durable Objects → Assistant → brain.

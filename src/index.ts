@@ -1,7 +1,7 @@
 import { getAgentByName } from "agents";
 import { Assistant } from "./assistant";
 import { door, mountFor } from "./door";
-import { BRAIN } from "./tools";
+import { BRAIN_NAME } from "./tools";
 
 export { Assistant };
 
@@ -9,7 +9,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
 
-    if (path === "/health") return Response.json({ brain: BRAIN });
+    if (path === "/health") return Response.json({ brain: BRAIN_NAME(env) });
 
     if (path === "/telegram/webhook" && request.method === "POST") {
       if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
@@ -26,7 +26,7 @@ export default {
       // takes far longer than a webhook should. The queue is durable, so the reply still gets
       // sent if this object is evicted while the brain is thinking.
       if (text && chatId === env.TELEGRAM_CHAT_ID) {
-        const brain = await getAgentByName(env.Assistant, BRAIN);
+        const brain = await getAgentByName(env.Assistant, BRAIN_NAME(env));
         await brain.queue("deliverTurn", { text, chatId, operationId: `tg${update!.update_id}` });
       }
       return new Response("ok");

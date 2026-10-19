@@ -1,7 +1,7 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { BRAIN } from "./tools";
+import { BRAIN_NAME } from "./tools";
 
 /**
  * Two mounts, one brain. A trusted token gets everything; anything else gets reads only.
@@ -24,7 +24,7 @@ export function door(env: Env) {
     async (ctx) => {
       const mount: Mount = ctx.requestInfo && mountFor(ctx.requestInfo, env) === "trusted" ? "trusted" : "read-only";
       const server = new McpServer({ name: "brain", version: "0.1.0" });
-      const brain = () => env.Assistant.getByName(BRAIN);
+      const brain = () => env.Assistant.getByName(BRAIN_NAME(env));
       const said = (text: string) => ({ content: [{ type: "text" as const, text }] });
 
       server.registerTool(
@@ -46,7 +46,7 @@ export function door(env: Env) {
         {
           title: "Ask the brain",
           description:
-            "Ask the brain something and get an answered reply, from his notes and his own judgement. Use for anything about adam: his plans, decisions, people, places, codes. This is the only tool that costs an agent turn.",
+            "Ask the brain something and get a reasoned answer, drawn from stored notes. Use it for anything about the person this brain belongs to: plans, decisions, people, places, codes. This is the only tool here that costs an agent turn.",
           inputSchema: z.object({ question: z.string() }),
         },
         async ({ question }) => said(await brain().ask(question)),

@@ -1,7 +1,7 @@
 import { Agent } from "agents";
 import { PiHarness } from "agents/harness/pi";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
-import { brainExtension, BRAIN, WHEN_HELP } from "./tools";
+import { brainExtension, BRAIN_NAME, WHEN_HELP, DEFAULT_TIMEZONE } from "./tools";
 import { brainModels, PROVIDER_ID } from "./model";
 import { createMemory, SCHEMA, type Memory } from "./store";
 import { send } from "./telegram";
@@ -28,9 +28,9 @@ export class Assistant extends Agent<Env> {
     });
 
     const registry = createRegistry();
-    registry.install(brainExtension(this.memory));
+    registry.install(brainExtension(this.memory, { who: BRAIN_NAME(this.env), zone: this.env.TIMEZONE ?? DEFAULT_TIMEZONE }));
 
-    const { models, model } = brainModels(() => this.env.CALLSTACK_API_KEY ?? "");
+    const { models, model } = brainModels(this.env);
     this.harness = new PiHarness({
       harness: ({ storage, context }) => Harness.open(storage, { models, registry }, context),
       defaults: { model: { provider: PROVIDER_ID, id: model.id } },

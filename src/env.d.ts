@@ -3,8 +3,22 @@ export {};
 declare global {
   interface Env {
     Assistant: DurableObjectNamespace<import("./assistant").Assistant>;
-    /** Model key for api.callstack.ai. */
-    CALLSTACK_API_KEY: string;
+
+    /** Names the brain and its Durable Object. Default "brain". */
+    BRAIN_NAME?: string;
+    /** Used for the clock in the brain's prompt and for scheduled times. Default "UTC". */
+    TIMEZONE?: string;
+
+    /** OpenAI-compatible endpoint root, e.g. https://api.example.com/v1 */
+    MODEL_BASE_URL: string;
+    /** Sent verbatim in the request body, so use whatever that endpoint expects. */
+    MODEL_ID: string;
+    MODEL_API_KEY: string;
+    /** Optional, and only needed past the defaults below. */
+    MODEL_CONTEXT_WINDOW?: string;
+    MODEL_MAX_TOKENS?: string;
+    MODEL_REASONING?: string;
+
     TELEGRAM_BOT_TOKEN: string;
     /** Random string Telegram echoes back on every webhook POST. */
     TELEGRAM_WEBHOOK_SECRET: string;
