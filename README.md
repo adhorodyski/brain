@@ -37,6 +37,11 @@ npm install
 npm run check
 ```
 
+`package.json` pins `@aws-sdk/credential-provider-http` to `3.972.76`. `pi-ai` pulls the AWS SDK for
+Bedrock, and upstream published a `3.972.77` that is listed on the registry but whose tarball returns 404 —
+without the pin, `npm install` fails for reasons that have nothing to do with this project. Delete the
+`overrides` block once `3.972.77` resolves.
+
 ### 2. Collect the four secrets
 
 **Telegram** — message [@BotFather](https://t.me/BotFather): `/newbot`, keep the token it prints. Then
