@@ -157,16 +157,18 @@ back from an agent that can write, however much it reads like a question.
 
 ## Layout
 
-Six files, ~560 lines. Everything else is reused: Pi Durable for the agent loop, `PiHarness` to host it in
-a Durable Object, the Agents SDK's MCP handler, Telegram's Bot API over plain `fetch`.
+Seven small modules and one type declaration, ~560 lines. Everything else is reused: Pi Durable for the
+agent loop, `PiHarness` to host it in a Durable Object, the Agents SDK's MCP handler, Telegram's Bot API
+over plain `fetch`.
 
 | File | |
 |---|---|
 | `src/index.ts` | Two routes and both guards |
 | `src/assistant.ts` | The brain: `PiHarness`, turns, plans |
-| `src/tools.ts` | The four tools the brain sees |
+| `src/tools.ts` | The four tools the brain sees, and `defang` |
 | `src/store.ts` | Notes and plans in SQLite — shared by both doors |
 | `src/door.ts` | MCP mount and the bearer-token choice |
+| `src/telegram.ts` | Send, with Telegram's 4096-char split |
 | `src/model.ts` | Apex, direct |
 
 Writes from the terminal are **direct SQLite**, not a turn through the brain: storing a note costs ~80
