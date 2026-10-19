@@ -11,6 +11,10 @@
     "MODEL_ID": "your-model-name"
   },
 
+  // Workers AI turns a fetched page into Markdown. Format conversions are free; the free tier also
+  // allows 10,000 neurons a day.
+  "ai": { "binding": "AI" },
+
   "observability": { "enabled": true },
   "durable_objects": {
     "bindings": [{ "name": "Assistant", "class_name": "Assistant" }]

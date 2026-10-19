@@ -1,14 +1,26 @@
 # durable-personal-agent
 
-One assistant brain on your Cloudflare account. It remembers what you tell it and keeps time for you. Two
-doors, one conversation: Telegram on your phone, and `pi` in your terminal over MCP. No app to install and no
-dashboard to check.
+One assistant brain on your Cloudflare account. It remembers what you tell it and keeps time for you. One
+conversation, several doors: Telegram on your phone, and `pi` in your terminal over MCP. No app to install
+and no dashboard to check.
 
 ```
-Telegram ─┐ secret + chat-ID allowlist    ┌─ Assistant (one Durable Object)
-          ├───────────────────────────────┤   transcript · SQLite notes · alarms
-pi (MCP)  ┘ bearer token                  ┘
+┌───────────────────────────────────────────────────┐
+│                     Assistant                     │
+│       one Durable Object · one conversation       │
+└─────────────────────────┬─────────────────────────┘
+                          │
+            ┌─────────────┴─────────────┐
+            │                           │
+┌───────────┬───────────┐   ┌───────────┬───────────┐
+│       Telegram        │   │          MCP          │
+│      your phone       │   │ pi, or any MCP client │
+└───────────────────────┘   └───────────────────────┘
 ```
+
+A door is one guard and one route into that single thread, so adding one changes nothing about the brain.
+Telegram checks a webhook secret and a chat ID; MCP checks a bearer token and answers `pi` in the terminal,
+or any other client that can post JSON.
 
 ## What you get
 
@@ -18,20 +30,18 @@ pi (MCP)  ┘ bearer token                  ┘
 | `recall` | Matching lines straight from SQLite. Costs no model call. |
 | `ask` | A reasoned answer drawn from your notes. The only tool that costs an agent turn. |
 | `schedule` | One-off and recurring reminders, delivered by a Durable Object alarm with nothing of yours running. Lists and cancels. |
+| `web_fetch` | A public URL as text, fenced as data. HTML and documents arrive as Markdown. |
 
-Both doors write the same thread, so you can ask from the terminal and continue from the phone. The brain
+Every door writes the same thread, so you can ask from the terminal and continue from the phone. The brain
 reads, writes notes, and talks on schedule. It holds no credentials in your accounts and cannot run code.
-That narrow surface is deliberate: `PiHarness` has no approval step for tool calls yet, so the four tools
-above are the whole permission model.
-
-A second optional token, `BRAIN_READ_ONLY_TOKEN`, exposes `recall` and nothing else. That is the mount you
-would attach to ChatGPT or Claude through their custom-server endpoints. `ask` cannot be read-only: it runs a
-brain turn, and that turn holds write tools.
+That narrow surface is deliberate: `PiHarness` has no approval step for tool calls yet, so the tools above
+are the whole permission model. One bearer token unlocks all of them and nothing else, private addresses
+are unreachable, and a fetched page is marked as data so a line in it cannot read as an instruction.
 
 ## Setup
 
 You need Node 22+, a Cloudflare account on the free tier, a Telegram bot, and any OpenAI-compatible chat
-endpoint. Your only spend is inference.
+endpoint. Your only spend is inference, plus the odd Workers AI conversion past its free daily allowance.
 
 ### 1. Install
 
@@ -79,7 +89,7 @@ curl -s localhost:8787/mcp -X POST \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-`/health` returns `{"brain":"brain"}`, the MCP call lists six tools, and removing the header returns 401.
+`/health` returns `{"brain":"brain"}`, the MCP call lists five tools, and removing the header returns 401.
 Local notes live in simulated storage, so deploying starts with an empty brain.
 
 ### 4. Set your vars and secrets, then deploy
@@ -144,7 +154,7 @@ to skip a discovery round trip:
 ```jsonc
 "description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",
 "toolExposure": {
-  "ask": "direct", "remember": "direct", "schedule": "direct", "recall": "codemode"
+  "ask": "direct", "remember": "direct", "schedule": "direct", "recall": "codemode", "web_fetch": "codemode"
 }
 ```
 
@@ -167,6 +177,8 @@ Put these in `wrangler.jsonc` under `vars`, or in `.dev.vars` while developing.
 | `MODEL_REASONING` | unset | Set `true` when the endpoint returns reasoning deltas. |
 | `BRAIN_NAME` | `brain` | Also names the Durable Object. Changing it starts an empty brain. |
 | `TIMEZONE` | `UTC` | Used for the clock in the brain's prompt and for scheduled times. |
+| `WEB_ALLOWED_HOSTS` | any public host | Comma-separated patterns a fetch may reach. `example.com` is that host alone; `*.example.com` covers subdomains. |
+| `WEB_BLOCKED_HOSTS` | unset | Comma-separated patterns a fetch must never reach. Wins over the allowlist. |
 | `BRAIN_HOSTNAME` | unset | Set once you serve a custom hostname, so MCP host validation accepts it. |
 
 ## After the first deploy

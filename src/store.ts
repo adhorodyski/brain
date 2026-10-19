@@ -1,11 +1,10 @@
 import { MAX_NOTE, WHEN_HELP } from "./tools";
 
-export type Note = { text: string; tags: string; at: string };
+export type Note = { text: string; tags: string; storedAt: string };
 
-/** The slice of the Agent the store needs, so this file holds no harness knowledge. */
 export type MemoryHost = {
   sql: (statement: string, values?: unknown[]) => Record<string, unknown>[];
-  /** Cron strings repeat; a Date fires once. The Agent scheduler reads them differently. */
+  // The Agent scheduler reads these two shapes differently: a string parses as cron, a Date fires once.
   arm: (when: string | Date, payload: { message: string }) => Promise<{ id: string }>;
   disarm: (scheduleId: string) => Promise<boolean>;
 };
@@ -15,10 +14,6 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS plans (key TEXT PRIMARY KEY, message TEXT NOT NULL, at TEXT, every TEXT, schedule_id TEXT, created_at TEXT NOT NULL)`,
 ];
 
-/**
- * Notes and plans, in the brain's own SQLite. Module-scope on purpose: the terminal door and the
- * brain read one table, so a `recall` over MCP is a read and not an agent turn.
- */
 export function createMemory(host: MemoryHost) {
   const changes = () => Number(host.sql("SELECT changes() AS n")[0]?.n ?? 0);
 
@@ -42,31 +37,23 @@ export function createMemory(host: MemoryHost) {
   };
 
   return {
-    note,
     rememberBatch,
 
     search(query: string, limit = 8): { lines: string[]; total: number } {
       const words = query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
       if (words.length === 0) return { lines: [], total: 0 };
       const rows = host.sql(
-        `SELECT text, tags, at FROM notes WHERE ${words.map(() => "lower(text) LIKE ?").join(" AND ")} ORDER BY at DESC LIMIT ?`,
+        `SELECT text, tags, at AS storedAt FROM notes WHERE ${words.map(() => "lower(text) LIKE ?").join(" AND ")} ORDER BY at DESC LIMIT ?`,
         [...words.map((word) => `%${word}%`), Math.min(limit, 30)],
       ) as unknown as Note[];
 
       return {
         total: rows.length,
-        lines: rows.map((row) => `• ${row.text}${row.tags ? ` [${row.tags}]` : ""} (${row.at.slice(0, 10)})`),
+        lines: rows.map((row) => `• ${row.text}${row.tags ? ` [${row.tags}]` : ""} (${row.storedAt.slice(0, 10)})`),
       };
     },
 
-    count(): number {
-      return Number(host.sql("SELECT count(*) AS n FROM notes")[0]?.n ?? 0);
-    },
-
     async add(input: { id: string; message: string; at?: string; every?: string }): Promise<string> {
-      // Validate before writing, so a rejected call never leaves a row behind. Cron strings and
-      // one-off datetimes are not interchangeable: the scheduler parses a string as cron, so an
-      // ISO datetime has to arrive as a Date or it fails as malformed cron.
       const at = input.at === undefined ? undefined : new Date(input.at);
       if (at !== undefined && Number.isNaN(at.getTime())) {
         throw new Error(`"${input.at}" is not a datetime. ${WHEN_HELP}`);
@@ -87,7 +74,6 @@ export function createMemory(host: MemoryHost) {
         const armed = await host.arm(when, { message: input.message });
         host.sql("UPDATE plans SET schedule_id = ? WHERE key = ?", [armed.id, input.id]);
       } catch (error) {
-        // A row with no schedule behind it would list forever and never fire.
         host.sql("DELETE FROM plans WHERE key = ?", [input.id]);
         throw error;
       }

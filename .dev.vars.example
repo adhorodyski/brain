@@ -16,8 +16,11 @@ TELEGRAM_WEBHOOK_SECRET=replace-with-openssl-rand-hex-24
 TELEGRAM_CHAT_ID=123456789
 BRAIN_TOKEN=replace-with-openssl-rand-hex-32
 
-# Optional: a token that sees `recall` alone. Unset means no read-only access.
-# BRAIN_READ_ONLY_TOKEN=
+# Optional: narrow what a fetch may reach. Unset means any public host; private and loopback hosts
+# are refused either way. A bare host matches that host alone, so list the wildcard too. WEB_BLOCKED_HOSTS
+# wins over WEB_ALLOWED_HOSTS.
+# WEB_ALLOWED_HOSTS=example.com,*.wikipedia.org
+# WEB_BLOCKED_HOSTS=*.example.internal
 
 # Optional: only needed once you serve a custom hostname.
 # BRAIN_HOSTNAME=brain.example.com

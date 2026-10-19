@@ -1,6 +1,6 @@
 import { getAgentByName } from "agents";
 import { Assistant } from "./assistant";
-import { door, mountFor } from "./door";
+import { door, isTrusted } from "./door";
 import { BRAIN_NAME } from "./tools";
 
 export { Assistant };
@@ -22,9 +22,7 @@ export default {
       const text = update?.message?.text?.trim();
       const chatId = String(update?.message?.chat?.id ?? "");
 
-      // Answer 200 immediately: Telegram retries a webhook that stays silent, and a brain turn
-      // takes far longer than a webhook should. The queue is durable, so the reply still gets
-      // sent if this object is evicted while the brain is thinking.
+      // Telegram retries a webhook that stays silent, well before a brain turn finishes.
       if (text && chatId === env.TELEGRAM_CHAT_ID) {
         const brain = await getAgentByName(env.Assistant, BRAIN_NAME(env));
         await brain.queue("deliverTurn", { text, chatId, operationId: `tg${update!.update_id}` });
@@ -33,7 +31,7 @@ export default {
     }
 
     if (path === "/mcp") {
-      if (!mountFor(request, env)) return new Response("unauthorized", { status: 401 });
+      if (!isTrusted(request, env)) return new Response("unauthorized", { status: 401 });
       return door(env)(request, env, ctx);
     }
 

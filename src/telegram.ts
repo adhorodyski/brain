@@ -1,5 +1,4 @@
-/** Telegram's own ceiling; a longer answer arrives as several messages rather than being lost. */
-export function chunks(text: string, size = 4096): string[] {
+function chunks(text: string, size = 4096): string[] {
   if (text.length <= size) return [text];
   const parts: string[] = [];
   for (let start = 0; start < text.length; start += size) parts.push(text.slice(start, start + size));

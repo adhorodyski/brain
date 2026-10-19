@@ -4,13 +4,6 @@ import { createModels } from "@earendil-works/pi-ai/models";
 
 export const PROVIDER_ID = "brain";
 
-/**
- * Any OpenAI-compatible chat endpoint, declared by env alone.
- *
- * `supportsStore` and `supportsDeveloperRole` stay off because those are the two
- * request fields an endpoint can accept without honouring, and a silently ignored
- * field is a worse debugging session than an absent one.
- */
 export function brainModels(env: Env) {
   const required: [string, string | undefined][] = [
     ["MODEL_BASE_URL", env.MODEL_BASE_URL],
@@ -37,6 +30,8 @@ export function brainModels(env: Env) {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,
     maxTokens,
+    // OpenAI-compatible endpoints accept these two request fields without honouring them, so an absent
+    // field fails louder than one silently ignored.
     compat: { supportsStore: false, supportsDeveloperRole: false },
   };
 
