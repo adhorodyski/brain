@@ -20,8 +20,5 @@
     "@cloudflare/workers-types": "^5.20261019.1",
     "typescript": "^5.9.0",
     "wrangler": "^4.149.0"
-  },
-  "overrides": {
-    "@aws-sdk/credential-provider-http": "3.972.76"
   }
 }

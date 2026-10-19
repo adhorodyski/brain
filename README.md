@@ -40,10 +40,6 @@ npm install
 npm run check
 ```
 
-`package.json` pins `@aws-sdk/credential-provider-http` to `3.972.76` because `pi-ai` pulls in the AWS SDK
-for Bedrock, and upstream published a `3.972.77` whose tarball returns 404. Without the pin, `npm install`
-fails for reasons unrelated to this project. Delete the `overrides` block once that tarball resolves.
-
 ### 2. Collect your values
 
 Start with the model. `MODEL_ID` goes on the wire unchanged, so use whatever string your endpoint expects,
