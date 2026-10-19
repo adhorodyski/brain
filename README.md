@@ -5,8 +5,8 @@ links I forward. Two doors, same conversation: **Telegram** on the phone, and **
 MCP. No app, no dashboard, no tab to open.
 
 It is not a digital employee. It never sends email, books anything, or acts in my accounts. It reads the
-web when asked, writes notes, and speaks on schedule. That boundary is deliberate — see
-[What it will not do](#what-it-will-not-do).
+web when asked, writes notes, and speaks on schedule. That boundary is deliberate, and it is the reason
+the tool list is as short as it is.
 
 ```
 Telegram ──┐  secret + chat-ID allowlist   ┌─ Assistant (one Durable Object, named "adam")
@@ -203,6 +203,6 @@ Borrowed, not rewritten, because that's cheaper:
   add/list/cancel `schedule` tool shape.
 - [`earendil-works/pi-durable`](https://github.com/earendil-works/pi-durable) — the harness itself.
 
-Not built here on purpose: any UI, OpenUI, ChatStorage, Cloudflare Access, bash or code execution,
-multi-user scopes, subagents, voice, photo ingestion. Notes in
-[`pi-assistant-plan/PLAN.md`](../pi-assistant-plan/PLAN.md) if you're wondering *why not*.
+Not built here on purpose, and please don't add them back without a reason: any UI, ChatStorage,
+Cloudflare Access, bash or any code execution, multi-user scopes, subagents, voice, photo ingestion. Every
+one was considered and cut; the reasoning lives in my local `pi-assistant-plan/PLAN.md`, not in this repo.
