@@ -1,8 +1,8 @@
 # durable-personal-agent
 
-One assistant brain on your Cloudflare account. It remembers what you tell it, keeps time for you, and reads
-links you forward. Two doors, one conversation: Telegram on your phone, and `pi` in your terminal over MCP.
-No app to install and no dashboard to check.
+One assistant brain on your Cloudflare account. It remembers what you tell it and keeps time for you. Two
+doors, one conversation: Telegram on your phone, and `pi` in your terminal over MCP. No app to install and no
+dashboard to check.
 
 ```
 Telegram ─┐ secret + chat-ID allowlist    ┌─ Assistant (one Durable Object)
@@ -18,11 +18,11 @@ pi (MCP)  ┘ bearer token                  ┘
 | `recall` | Matching lines straight from SQLite. Costs no model call. |
 | `ask` | A reasoned answer drawn from your notes. The only tool that costs an agent turn. |
 | `schedule` | One-off and recurring reminders, delivered by a Durable Object alarm with nothing of yours running. Lists and cancels. |
-| `fetch_page` | Reads a URL and returns fenced text, so a hostile page cannot speak as you. |
-| `forget` | Wipes every note and plan. Requires `confirm: "ERASE"`. |
 
 Both doors write the same thread, so you can ask from the terminal and continue from the phone. The brain
 reads, writes notes, and talks on schedule. It holds no credentials in your accounts and cannot run code.
+That narrow surface is deliberate: `PiHarness` has no approval step for tool calls yet, so the four tools
+above are the whole permission model.
 
 A second optional token, `BRAIN_READ_ONLY_TOKEN`, exposes `recall` and nothing else. That is the mount you
 would attach to ChatGPT or Claude through their custom-server endpoints. `ask` cannot be read-only: it runs a
@@ -148,8 +148,7 @@ to skip a discovery round trip:
 ```jsonc
 "description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",
 "toolExposure": {
-  "ask": "direct", "remember": "direct", "schedule": "direct",
-  "recall": "codemode", "fetch_page": "codemode"
+  "ask": "direct", "remember": "direct", "schedule": "direct", "recall": "codemode"
 }
 ```
 
@@ -183,5 +182,5 @@ npx wrangler deployments list  # roll back from the dashboard if a deploy is bad
 ```
 
 A deploy restarts the Durable Object and keeps its storage, so notes and schedules survive and a turn that
-was mid-flight resumes. To clear the brain's memory, call `forget` or delete the object under Workers →
-Durable Objects → Assistant → brain.
+was mid-flight resumes. To start the brain empty, delete its data under Workers → Durable Objects →
+Assistant → brain, or locally delete `.wrangler/state` while `npm run dev` is stopped.

@@ -23,7 +23,7 @@ export class Assistant extends Agent<Env> {
 
     this.memory = createMemory({
       sql: (statement, values) => Array.from(this.ctx.storage.sql.exec(statement, ...(values ?? []))),
-      arm: async (when, payload) => this.schedule(when as never, "planFired", payload, { idempotent: true }),
+      arm: (when, payload) => this.schedule(when, "planFired", payload, { idempotent: true }),
       disarm: (scheduleId) => this.cancelSchedule(scheduleId),
     });
 
@@ -68,11 +68,6 @@ export class Assistant extends Agent<Env> {
     );
   }
 
-  /** A reset switch, so experimenting doesn't require the DO dashboard. */
-  async forget(): Promise<string> {
-    await this.harness.abort();
-    return this.memory.forget();
-  }
 
   /**
    * Below here is what the terminal door calls. Reads and writes go straight to SQLite: none of these
@@ -94,7 +89,4 @@ export class Assistant extends Agent<Env> {
     return this.memory.add({ id: `door${crypto.randomUUID()}`, message: input.message, at: input.at, every: input.every });
   }
 
-  async page(url: string): Promise<string> {
-    return this.memory.fetchPage(url);
-  }
 }

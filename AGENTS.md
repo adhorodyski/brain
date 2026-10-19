@@ -13,7 +13,7 @@ hosts a Pi Durable agent through `PiHarness`. Two doors, one conversation thread
 |---|---|
 | `src/index.ts` | The three routes (`/health`, `/telegram/webhook`, `/mcp`) and both guards. The Telegram route verifies the webhook secret, allowlists the chat ID, and pushes the turn onto the Agent's durable queue. |
 | `src/assistant.ts` | The Agent class. Builds the memory store, installs the tools, owns `PiHarness`, `turn()`, and every door-facing method. The `PiHarness` seam lives here and nowhere else. |
-| `src/tools.ts` | `defineTool` definitions for the four tools the brain sees, the prompt preamble, `BRAIN_NAME`, `WHEN_HELP`, and `defang`. |
+| `src/tools.ts` | `defineTool` definitions for the three tools the brain sees (`remember`, `recall`, `schedule`), the prompt preamble, `BRAIN_NAME`, and `WHEN_HELP`. |
 | `src/store.ts` | Notes and plans in SQLite. Module-scope factory, so the door and the brain read one table. |
 | `src/door.ts` | The MCP mount, and the choice of which tools a bearer token unlocks. |
 | `src/telegram.ts` | `send()`, with the 4096-character split. |
@@ -31,7 +31,7 @@ hosts a Pi Durable agent through `PiHarness`. Two doors, one conversation thread
 - **`createModels()` takes options, not a provider array.** Use `createModels()` then `setProvider()`.
 - **Only `@callable` methods and plain public methods reachable from worker code cross the DO RPC
   boundary.** `stub.memory` is private and cannot be read from `src/door.ts`. That is why the door calls the
-  thin methods at the bottom of `Assistant` (`recall`, `remember`, `plan`, `page`, `ask`, `forget`).
+  thin methods at the bottom of `Assistant` (`recall`, `remember`, `plan`, `ask`).
 - **`this.schedule(when, "callbackName", payload)` takes the callback as a string** naming a method on the
   class. `planFired` is that method.
 - **One conversation thread, the root session.** Do not add `sessions.create()` or `fork()`.
@@ -47,15 +47,15 @@ hosts a Pi Durable agent through `PiHarness`. Two doors, one conversation thread
   a turn's tools cannot be restricted. An `ask` answer comes from an agent holding write tools regardless of
   who called it.
 - **Every tool is `replay: "safe"` because each is keyed on the call that made it.** `api.taskId` and
-  `api.callId` form the dedupe key, checked inside the same transaction as the write. A future tool with an
-  outside effect must be `replay: "unsafe"`.
-- **`fetch_page` fences its output.** Untrusted text enters a durable transcript with no approval step, so
-  `defang` (copied from pi-pocket, MIT) neutralises `<` before `/` including invisible-character evasion,
-  and the result is wrapped in `<fetched>`, which the preamble declares to be data.
+  `api.callId` form the dedupe key (the key shape borrowed from pi-pocket, MIT), checked inside the same
+  transaction as the write. A future tool with an outside effect must be `replay: "unsafe"`.
+- **The tool list is the whole permission model.** Pi Durable has no approval step for tool calls, so
+  nothing can widen what the brain does at runtime. `ask` is door-only and runs a full turn; the other
+  three are direct SQLite reads and writes. There is no web access, no shell, no code execution, and no
+  credentials in anyone's accounts. Anything that fetches untrusted text into this transcript needs to
+  fence it before it can be stored.
 - **There is no UI and there should not be one.** No ChatStorage, no WebSockets, no AG-UI, no Access. Both
   doors are request/response. `PiHarness` and `session.events()` exist for streaming UIs and are unused.
-- **No side-effecting tools.** No bash, no shell, no code execution, no account credentials. Pi Durable has
-  no approval step for tool calls yet, so a narrow tool list is the permission layer.
 - **`PiHarness` is beta** and its API may change. Keep the seam inside `src/assistant.ts`.
 
 ## Checks
@@ -67,4 +67,4 @@ npx wrangler deploy --dry-run                   # must bundle; watch gzipped siz
 
 To exercise the doors locally, put values in `.dev.vars`, run `npm run dev`, and drive `/mcp` with curl
 using `tools/list` and `tools/call`. A read-only token should list `recall` alone and should not reach
-`remember` or `forget`.
+`remember`.

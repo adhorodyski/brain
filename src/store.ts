@@ -1,12 +1,12 @@
-import { MAX_NOTE, WHEN_HELP, defang, MAX_PAGE } from "./tools";
+import { MAX_NOTE, WHEN_HELP } from "./tools";
 
 export type Note = { text: string; tags: string; at: string };
 
 /** The slice of the Agent the store needs, so this file holds no harness knowledge. */
 export type MemoryHost = {
   sql: (statement: string, values?: unknown[]) => Record<string, unknown>[];
-  /** Arm a brain callback: `when` is a cron string or an ISO datetime. */
-  arm: (when: string, payload: { message: string }) => Promise<{ id: string }>;
+  /** Cron strings repeat; a Date fires once. The Agent scheduler reads them differently. */
+  arm: (when: string | Date, payload: { message: string }) => Promise<{ id: string }>;
   disarm: (scheduleId: string) => Promise<boolean>;
 };
 
@@ -64,6 +64,16 @@ export function createMemory(host: MemoryHost) {
     },
 
     async add(input: { id: string; message: string; at?: string; every?: string }): Promise<string> {
+      // Validate before writing, so a rejected call never leaves a row behind. Cron strings and
+      // one-off datetimes are not interchangeable: the scheduler parses a string as cron, so an
+      // ISO datetime has to arrive as a Date or it fails as malformed cron.
+      const at = input.at === undefined ? undefined : new Date(input.at);
+      if (at !== undefined && Number.isNaN(at.getTime())) {
+        throw new Error(`"${input.at}" is not a datetime. ${WHEN_HELP}`);
+      }
+      const when = input.every ?? at;
+      if (when === undefined) throw new Error(WHEN_HELP);
+
       host.sql("INSERT OR IGNORE INTO plans (key, message, at, every, created_at) VALUES (?, ?, ?, ?, ?)", [
         input.id,
         input.message,
@@ -73,11 +83,14 @@ export function createMemory(host: MemoryHost) {
       ]);
       if (changes() === 0) return "Already scheduled earlier — left as it was.";
 
-      const when = input.every ?? input.at;
-      if (!when) throw new Error(WHEN_HELP);
-
-      const armed = await host.arm(when, { message: input.message });
-      host.sql("UPDATE plans SET schedule_id = ? WHERE key = ?", [armed.id, input.id]);
+      try {
+        const armed = await host.arm(when, { message: input.message });
+        host.sql("UPDATE plans SET schedule_id = ? WHERE key = ?", [armed.id, input.id]);
+      } catch (error) {
+        // A row with no schedule behind it would list forever and never fire.
+        host.sql("DELETE FROM plans WHERE key = ?", [input.id]);
+        throw error;
+      }
 
       return input.every
         ? `Scheduled: every ${input.every} — "${brief(input.message)}"`
@@ -100,26 +113,6 @@ export function createMemory(host: MemoryHost) {
         host.sql("DELETE FROM plans WHERE key = ?", [String(row.key)]);
       }
       return `Cancelled ${id}.`;
-    },
-
-    /** Output is fenced and truncated: a page must not become a confident voice inside a durable transcript. */
-    async fetchPage(url: string): Promise<string> {
-      const target = new URL(url);
-      if (target.protocol !== "https:" && target.protocol !== "http:") throw new Error("http(s) only.");
-      const response = await fetch(url, { headers: { "user-agent": "brain/0.1" } });
-      const prose = (await response.text())
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, MAX_PAGE);
-      return `<fetched url="${target.hostname}">\n${defang(prose)}\n</fetched>`;
-    },
-
-    forget() {
-      host.sql("DELETE FROM notes");
-      host.sql("DELETE FROM plans");
-      return "Forgot everything.";
     },
   };
 }
