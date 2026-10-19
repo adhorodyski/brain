@@ -83,6 +83,18 @@ export function door(env: Env) {
       );
 
       server.registerTool(
+        "forget",
+        {
+          title: "Forget everything",
+          description:
+            "Erase every stored note and plan from the brain. Irreversible. Call it only when I say to wipe the brain on purpose.",
+          inputSchema: z.object({ confirm: z.literal("ERASE") }),
+          annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+        },
+        async () => said(await brain().forget()),
+      );
+
+      server.registerTool(
         "fetch_page",
         {
           title: "Fetch page",

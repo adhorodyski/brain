@@ -23,6 +23,7 @@ pi (MCP) ──┘  bearer token → tool mount    ┘   schedules that fire wit
 | **ask** | A real answer, reasoned from the notes. The one tool that costs an agent turn. |
 | **schedule** | One-off and recurring, delivered to Telegram from a Durable Object alarm. List and cancel. |
 | **fetch_page** | Reads a URL, truncates it, and fences it as data so a hostile page can't speak as me. |
+| **forget** | Wipes every note and plan. Refuses to run without `confirm: "ERASE"`, and isn't offered to the read-only mount. |
 | **Two doors, one thread** | Ask from the terminal, continue from the phone. Same transcript, same memory. |
 
 ## Setup
@@ -42,7 +43,7 @@ Bedrock, and upstream published a `3.972.77` that is listed on the registry but 
 without the pin, `npm install` fails for reasons that have nothing to do with this project. Delete the
 `overrides` block once `3.972.77` resolves.
 
-### 2. Collect the four secrets
+### 2. Collect the five secrets
 
 **Telegram** — message [@BotFather](https://t.me/BotFather): `/newbot`, keep the token it prints. Then
 message your new bot once from your phone and open:
@@ -70,40 +71,55 @@ cp .dev.vars.example .dev.vars   # fill in the values above
 npm run dev
 ```
 
-Then, in another terminal:
+Then, in another terminal — substituting the `BRAIN_TOKEN` value you just put in `.dev.vars`:
 
 ```sh
 curl -s localhost:8787/health
+
 curl -s localhost:8787/mcp -X POST \
   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
-  -H "authorization: Bearer $BRAIN_TOKEN" \
+  -H "authorization: Bearer <BRAIN_TOKEN from .dev.vars>" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-`/health` answers, `/mcp` lists five tools with the token and returns **401** without it, and the Telegram
-route returns **403** unless the webhook secret matches. Notes written here live in local simulated
-storage only; deploying starts a fresh brain.
+Expected: `/health` answers `{"brain":"adam"}`, the MCP call lists all six tools, and dropping the header
+gives **401**. Notes written here go to local simulated storage only; deploying starts an empty brain.
 
-### 4. Deploy
+### 4. Secrets, then deploy
 
 ```sh
 npx wrangler login
-npx wrangler deploy
 
 npx wrangler secret put CALLSTACK_API_KEY
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_CHAT_ID
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put BRAIN_TOKEN
+
+npx wrangler secret list          # confirm all five are there
+npx wrangler deploy
 ```
 
-Secrets are per-environment, so **run `secret put` again after every deploy that creates a new version you
-want to use** — or set them in the Cloudflare dashboard under *Workers → Settings → Variables*.
+Each `secret put` prompts for the value and, as a side effect, publishes a new Worker version — which is why
+they go **before** `deploy`, so the first version that serves traffic is already configured. **Set them once:
+secrets live on the Worker, not on a version, and every later `wrangler deploy` keeps them.** Set the
+optional `BRAIN_READ_ONLY_TOKEN` the same way if you want the read-only mount.
 
-The first deploy needs `migrations: [{ tag: "v1", new_sqlite_classes: ["Assistant"] }]`, which is already in
-[`wrangler.jsonc`](wrangler.jsonc). Never edit an old migration tag — add a new one.
+The first deploy needs `migrations: [{ tag: "v1", new_sqlite_classes: ["Assistant"] }]`, already in
+[`wrangler.jsonc`](wrangler.jsonc) — without it the Worker deploys and then fails at runtime with *"no such
+Durable Object class"*. Never edit an old migration tag; add a new one.
 
-### 5. Wire up Telegram
+### 5. Prove it's live
+
+```sh
+curl -s https://<your-worker>.workers.dev/health    # {"brain":"adam"}
+npx wrangler tail                                   # leave this open while you test
+```
+
+`wrangler tail` is the only window into the brain — every model failure and rejected webhook shows there
+and nowhere else. Note the Worker may need a minute to be reachable on `workers.dev` the first time.
+
+### 6. Wire up Telegram
 
 ```sh
 ./scripts/set-webhook.sh
@@ -116,7 +132,7 @@ It sets the webhook URL and the shared secret in one call. Send your bot a messa
 The reply is sent **once**, never edited — no fake streaming, no edit-as-typewriter walking into Telegram's
 flood control.
 
-### 6. Wire up your terminal
+### 7. Wire up your terminal
 
 ```sh
 pi mcp add brain --url https://<your-worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
@@ -174,8 +190,20 @@ over plain `fetch`.
 Writes from the terminal are **direct SQLite**, not a turn through the brain: storing a note costs ~80
 tokens and grows nobody's transcript. `ask` is the metered one.
 
-Reset the brain without the dashboard: `await brain.forget()` from a callable, or clear the DO's SQLite in
-*Workers → Durable Objects*.
+The `forget` tool (trusted mount only) wipes every note and plan — it refuses to run unless you pass
+`confirm: "ERASE"`, and it isn't offered to the read-only mount.
+
+## Day two
+
+```sh
+npx wrangler deploy            # every code change; the DO restarts, its SQLite does not
+npx wrangler tail              # live errors
+npx wrangler deployments list  # and rollback in the dashboard if a deploy is bad
+```
+
+A deploy restarts every running Durable Object but keeps its storage, so notes and schedules survive and an
+in-flight turn simply resumes. To wipe the brain's memory, use the `forget` tool above, or delete the
+object's data at *Workers → Durable Objects → Assistant → adam*.
 
 ## Known rough edges
 
