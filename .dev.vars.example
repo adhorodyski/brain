@@ -1,0 +1,10 @@
+# Copy to .dev.vars for `npm run dev`; use `npm run secrets` for the real thing.
+CALLSTACK_API_KEY=sk-...
+TELEGRAM_BOT_TOKEN=123456:ABC-def
+TELEGRAM_WEBHOOK_SECRET=openssl-rand-hex-24
+TELEGRAM_CHAT_ID=123456789
+BRAIN_TOKEN=openssl-rand-hex-32
+# Optional: a token that sees `recall` only. Unset means the read-only mount does not exist.
+# BRAIN_READ_ONLY_TOKEN=
+# Optional: only needed once you serve a custom hostname.
+# BRAIN_HOSTNAME=brain.example.com
