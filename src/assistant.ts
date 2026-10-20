@@ -71,6 +71,10 @@ export class Assistant extends Agent<Env> {
     return this.memory.rememberBatch(items, `door${crypto.randomUUID()}`);
   }
 
+  async forget(noteId: number, confirm: string): Promise<string> {
+    return this.memory.forget(noteId, confirm);
+  }
+
   async plan(action: string, input: { message?: string; at?: string; every?: string; id?: string }): Promise<string> {
     if (action === "list") return this.memory.list();
     if (action === "cancel") return this.memory.cancel(input.id ?? "");
