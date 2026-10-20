@@ -109,18 +109,28 @@ export function createMemory(host: MemoryHost) {
     },
 
     async cancel(id: string): Promise<string> {
-      const rows = host.sql("SELECT key, schedule_id FROM plans WHERE key LIKE ?", [`%${id}`]);
-      if (rows.length === 0) return `There is no schedule ${id}.`;
-      for (const row of rows) {
-        if (row.schedule_id) await host.disarm(String(row.schedule_id));
-        host.sql("DELETE FROM plans WHERE key = ?", [String(row.key)]);
-      }
-      return `Cancelled ${id}.`;
+      const wanted = id.trim();
+      if (!wanted) return "Name an id from list to cancel — nothing was cancelled.";
+
+      const rows = host.sql("SELECT key, message, schedule_id FROM plans") as unknown as Plan[];
+      const matches = rows.filter((row) => row.key.endsWith(wanted));
+      if (matches.length === 0) return `There is no schedule ${wanted}, so nothing was cancelled. Run list for fresh ids.`;
+      if (matches.length > 1)
+        return `${matches.length} schedules end with ${wanted}, so nothing was cancelled. Cancel with a longer id:\n${matches
+          .map((row) => `  ${row.key}: "${brief(row.message)}"`)
+          .join("\n")}`;
+
+      const [match] = matches;
+      if (match.schedule_id) await host.disarm(match.schedule_id);
+      host.sql("DELETE FROM plans WHERE key = ?", [match.key]);
+      return `Cancelled ${match.key}: "${brief(match.message)}"`;
     },
   };
 }
 
 export type Memory = ReturnType<typeof createMemory>;
+
+type Plan = { key: string; message: string; schedule_id: string | null };
 
 function brief(text: string): string {
   return text.length > 60 ? `${text.slice(0, 59)}…` : text;

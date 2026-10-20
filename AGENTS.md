@@ -76,6 +76,11 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   not delete on the number alone, and do not make the handle stable by renumbering: that buys nothing
   once the confirm check exists. Keep the refusal on an empty `confirm` too: `text.includes("")` is true
   for every string, so without it a blank `confirm` matches any note and deletes the row the number names.
+- **`cancel` matches the id as a suffix and refuses unless exactly one plan ends with it**, quoting every
+  candidate when two do. `list` prints the last six characters of a key, so a full key is never in hand; a
+  `LIKE '%id'` that deleted every match let one call take out two plans on a short id, and `""` or `"%"`
+  let it wipe the table. The guard sits in the store, not only in the tool, so the MCP door cannot walk an
+  empty id into it either.
 
 ## Decisions worth knowing before you change them
 
