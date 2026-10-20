@@ -72,7 +72,7 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
   const forget = defineTool({
     name: "forget",
     description:
-      "Delete one stored note for good. Pass the #number from recall and a few words of that note's text: nothing is removed unless both point at the same note, so confirm with the person what is to go before calling this.",
+      "Delete one stored note for good. Pass the #number from recall and a few words of that note's text: nothing is removed unless both point at the same note.",
     parameters: Type.Object({
       noteId: Type.Number({ description: "The #number of the note, as recall printed it" }),
       confirm: Type.String({ description: "Words taken from that note's own text" }),

@@ -74,7 +74,8 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   unrelated text. That is why `forget` needs the number *and* words from the note itself and refuses
   when the two disagree — it is the guard against a confirmation drifting onto a different note. Do
   not delete on the number alone, and do not make the handle stable by renumbering: that buys nothing
-  once the confirm check exists.
+  once the confirm check exists. Keep the refusal on an empty `confirm` too: `text.includes("")` is true
+  for every string, so without it a blank `confirm` matches any note and deletes the row the number names.
 
 ## Decisions worth knowing before you change them
 
@@ -93,10 +94,11 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   allows 10,000 neurons a day. The door calls the brain's own tool rather than a second fetch path, so
   both doors word a page and a refusal identically and `isError` survives the trip — keep it that way,
   and keep `NO_TURN_API` honest: the adapter takes that argument as `_api` and never reads it.
-- **Every tool is `replay: "safe"`.** The SQLite tools are keyed on the call that made it —
+- **Every tool is `replay: "safe"`.** The tools that write notes and plans are keyed on the call that made it —
   `api.taskId` and `api.callId` form the dedupe key (the key shape borrowed from pi-pocket, MIT), checked
   inside the same transaction as the write — so rerunning one after an eviction changes nothing.
-  `web_fetch` is safe for a different reason: it has no effect of ours to redo, and a completed result is
+  `forget` is safe without a key: deleting a row that is already gone deletes nothing. `web_fetch` is safe
+  for a different reason: it has no effect of ours to redo, and a completed result is
   stored and not refetched. A tool that charges or writes outside this DO must be `replay: "unsafe"`.
 - **The tool list is the whole permission model.** Pi Durable has no approval step for tool calls, so
   nothing can widen what the brain does at runtime. `ask` is door-only and runs a full turn; the rest
