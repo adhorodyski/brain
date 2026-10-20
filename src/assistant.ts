@@ -77,7 +77,10 @@ export class Assistant extends Agent<Env> {
 
   async plan(action: string, input: { message?: string; at?: string; every?: string; id?: string }): Promise<string> {
     if (action === "list") return this.memory.list();
-    if (action === "cancel") return this.memory.cancel(input.id ?? "");
+    if (action === "cancel") {
+      if (!input.id) throw new Error("cancel needs an id from list.");
+      return this.memory.cancel(input.id);
+    }
     if (!input.message) throw new Error(`add needs a message. ${WHEN_HELP}`);
     return this.memory.add({ id: `door${crypto.randomUUID()}`, message: input.message, at: input.at, every: input.every });
   }
