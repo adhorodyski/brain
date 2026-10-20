@@ -70,6 +70,18 @@ export function door(env: Env) {
       );
 
       server.registerTool(
+        "forget",
+        {
+          title: "Forget",
+          description:
+            "Delete one stored note for good. Takes the #number recall printed plus a few words of that note's own text; nothing goes unless both point at the same note. Confirm with the person first.",
+          inputSchema: z.object({ noteId: z.number().int().min(1), confirm: z.string() }),
+          annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+        },
+        async ({ noteId, confirm }) => said(await brain().forget(noteId, confirm)),
+      );
+
+      server.registerTool(
         WEB_FETCH_TOOL_NAME,
         {
           title: "Fetch page",

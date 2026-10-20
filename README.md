@@ -30,6 +30,7 @@ or any other client that can post JSON.
 | `recall` | Matching lines straight from SQLite. Costs no model call. |
 | `ask` | A reasoned answer drawn from your notes. The only tool that costs an agent turn. |
 | `schedule` | One-off and recurring reminders, delivered by a Durable Object alarm with nothing of yours running. Lists and cancels. |
+| `forget` | Deletes one note, and only the note both its recall number and a quoted word of its text agree on. |
 | `web_fetch` | A public URL as text, fenced as data. HTML and documents arrive as Markdown. |
 
 Every door writes the same thread, so you can ask from the terminal and continue from the phone. The brain
@@ -89,7 +90,7 @@ curl -s localhost:8787/mcp -X POST \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-`/health` returns `{"brain":"brain"}`, the MCP call lists five tools, and removing the header returns 401.
+`/health` returns `{"brain":"brain"}`, the MCP call lists six tools, and removing the header returns 401.
 Local notes live in simulated storage, so deploying starts with an empty brain.
 
 ### 4. Set your vars and secrets, then deploy
@@ -154,7 +155,7 @@ to skip a discovery round trip:
 ```jsonc
 "description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",
 "toolExposure": {
-  "ask": "direct", "remember": "direct", "schedule": "direct", "recall": "codemode", "web_fetch": "codemode"
+  "ask": "direct", "remember": "direct", "schedule": "direct", "recall": "codemode", "forget": "codemode", "web_fetch": "codemode"
 }
 ```
 

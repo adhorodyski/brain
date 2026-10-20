@@ -25,10 +25,10 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 |---|---|
 | `src/index.ts` | The three routes (`/health`, `/telegram/webhook`, `/mcp`) and both guards. The Telegram route verifies the webhook secret, allowlists the chat ID, and pushes the turn onto the Agent's durable queue. |
 | `src/assistant.ts` | The Agent class. Builds the memory store, installs the tools, owns `PiHarness`, `turnWithin()`, and every door-facing method. The `PiHarness` seam lives here and nowhere else. |
-| `src/tools.ts` | `defineTool` definitions for the three tools the brain sees (`remember`, `recall`, `schedule`), the prompt preamble, `BRAIN_NAME`, and `WHEN_HELP`. |
+| `src/tools.ts` | `defineTool` definitions for the four tools the brain sees (`remember`, `recall`, `schedule`, `forget`) and the prompt preamble, plus `BRAIN_NAME`. |
 | `src/web.ts` | Cloudflare's `web_fetch` installed for the brain, the same tool run once for the door's `readPage()`, one `webPolicy()` behind both, and `renamesContentToOutput()` to let Cloudflare's adapter run on pi-durable 1.3. |
-| `src/store.ts` | Notes and plans in SQLite. Module-scope factory, so the door and the brain read one table. |
-| `src/door.ts` | The MCP mount: the five tools the bearer token unlocks, and `isTrusted()`. |
+| `src/store.ts` | Notes and plans in SQLite, plus the `MAX_NOTE` / `WHEN_HELP` strings the tool descriptions quote. Module-scope factory, so the door and the brain read one table. |
+| `src/door.ts` | The MCP mount: the six tools the bearer token unlocks, and `isTrusted()`. |
 | `src/telegram.ts` | `send()`, with the 4096-character split. |
 | `src/model.ts` | Declares one provider from `MODEL_*` vars. Any OpenAI-compatible endpoint. The `MODEL_ID` you declare is the string sent on the wire. |
 | `src/env.d.ts` | The `Env` shape, uncommented by rule. Every var is described in the README's optional vars table or in setup step 4. |
@@ -69,6 +69,12 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   `search` reads the note column back as `storedAt` so the row type says which; keep the alias if you
   touch that query, because SQLite hands back the alias verbatim and a snake_case alias silently
   undefineds the date in every recall line.
+- **The `#number` in a recall line is a SQLite `rowid`, and rowids get reused.** Deleting the highest
+  note frees its number for the next note written, so a handle read from a stale recall can point at
+  unrelated text. That is why `forget` needs the number *and* words from the note itself and refuses
+  when the two disagree — it is the guard against a confirmation drifting onto a different note. Do
+  not delete on the number alone, and do not make the handle stable by renumbering: that buys nothing
+  once the confirm check exists.
 
 ## Decisions worth knowing before you change them
 
@@ -94,7 +100,7 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   stored and not refetched. A tool that charges or writes outside this DO must be `replay: "unsafe"`.
 - **The tool list is the whole permission model.** Pi Durable has no approval step for tool calls, so
   nothing can widen what the brain does at runtime. `ask` is door-only and runs a full turn; the other
-  four are direct SQLite reads and writes or one public fetch. There is no shell, no code execution, and
+  five are direct SQLite reads and writes or one public fetch. There is no shell, no code execution, and
   no credentials in anyone's accounts. What a page holds reaches the transcript only inside
   `<untrusted_web_content>`, with a nested closing tag escaped, and loopback, private, and link-local
   hosts are refused however `WEB_ALLOWED_HOSTS` reads — so `169.254.169.254` and `localhost` are
@@ -106,10 +112,15 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 ## Checks
 
 ```sh
-npm run check                                   # tsc, must stay clean
+npm run check                                   # worker and test tsc, must stay clean
+npm test                                        # store behaviour, in-memory SQLite
 npx wrangler deploy --dry-run                   # must bundle; watch gzipped size
 ```
 
+`npm test` runs `test/*.test.ts` on `node:sqlite` against the real `SCHEMA`, which is why `src/store.ts`
+imports nothing worker-side: `MAX_NOTE` and `WHEN_HELP` live there so the store stands alone. `test/` type
+checks against `@types/node` in `tsconfig.test.json`, leaving `tsconfig.json` typed for the worker alone.
+
 To exercise the doors locally, put values in `.dev.vars`, run `npm run dev`, and drive `/mcp` with curl
-using `tools/list` and `tools/call`. Expect five tools. A wrong token should 401 before any tool runs, and
+using `tools/list` and `tools/call`. Expect six tools. A wrong token should 401 before any tool runs, and
 `web_fetch` on `http://169.254.169.254/` should come back refused rather than fetched.

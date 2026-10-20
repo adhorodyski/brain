@@ -1,6 +1,8 @@
-import { MAX_NOTE, WHEN_HELP } from "./tools";
+export const MAX_NOTE = 300;
 
-export type Note = { text: string; tags: string; storedAt: string };
+export const WHEN_HELP = `Give "at" as an ISO 8601 datetime with its offset (e.g. 2026-03-04T09:00:00+01:00), or "every" as a 5-field cron expression (e.g. "0 8 * * 1-5").`;
+
+export type Note = { noteId: number; text: string; tags: string; storedAt: string };
 
 export type MemoryHost = {
   sql: (statement: string, values?: unknown[]) => Record<string, unknown>[];
@@ -43,14 +45,31 @@ export function createMemory(host: MemoryHost) {
       const words = query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
       if (words.length === 0) return { lines: [], total: 0 };
       const rows = host.sql(
-        `SELECT text, tags, at AS storedAt FROM notes WHERE ${words.map(() => "lower(text) LIKE ?").join(" AND ")} ORDER BY at DESC LIMIT ?`,
+        `SELECT rowid AS noteId, text, tags, at AS storedAt FROM notes WHERE ${words.map(() => "lower(text) LIKE ?").join(" AND ")} ORDER BY at DESC LIMIT ?`,
         [...words.map((word) => `%${word}%`), Math.min(limit, 30)],
       ) as unknown as Note[];
 
       return {
         total: rows.length,
-        lines: rows.map((row) => `• ${row.text}${row.tags ? ` [${row.tags}]` : ""} (${row.storedAt.slice(0, 10)})`),
+        lines: rows.map((row) => `#${row.noteId} ${row.text}${row.tags ? ` [${row.tags}]` : ""} (${row.storedAt.slice(0, 10)})`),
       };
+    },
+
+    forget(noteId: number, confirm: string): string {
+      const wanted = confirm.trim().toLowerCase();
+      if (!wanted) return "Name a few words of the note to confirm it — nothing was removed.";
+
+      const [row] = host.sql("SELECT rowid AS noteId, text FROM notes WHERE rowid = ?", [
+        noteId,
+      ]) as unknown as Pick<Note, "noteId" | "text">[];
+      if (!row) return `There is no note #${noteId}, so nothing was removed. Run recall for fresh numbers.`;
+
+      if (!row.text.toLowerCase().includes(wanted)) {
+        return `Note #${noteId} is "${row.text}" — that is not the note you named, so nothing was removed.`;
+      }
+
+      host.sql("DELETE FROM notes WHERE rowid = ?", [row.noteId]);
+      return `Forgot #${row.noteId}: "${row.text}"`;
     },
 
     async add(input: { id: string; message: string; at?: string; every?: string }): Promise<string> {

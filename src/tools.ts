@@ -1,14 +1,11 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import type { Memory } from "./store";
+import { MAX_NOTE, WHEN_HELP, type Memory } from "./store";
 
 export const DEFAULT_BRAIN = "brain";
 export const DEFAULT_TIMEZONE = "UTC";
-export const MAX_NOTE = 300;
 
 export const BRAIN_NAME = (env: { BRAIN_NAME?: string }) => env.BRAIN_NAME ?? DEFAULT_BRAIN;
-
-export const WHEN_HELP = `Give "at" as an ISO 8601 datetime with its offset (e.g. 2026-03-04T09:00:00+01:00), or "every" as a 5-field cron expression (e.g. "0 8 * * 1-5").`;
 
 const said = (text: string) => ({ output: [{ type: "text" as const, text }] });
 
@@ -69,15 +66,27 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
     },
   });
 
+  const forget = defineTool({
+    name: "forget",
+    description:
+      "Delete one stored note for good. Pass the #number from recall and a few words of that note's text: nothing is removed unless both point at the same note, so confirm with the person what is to go before calling this.",
+    parameters: Type.Object({
+      noteId: Type.Number({ description: "The #number of the note, as recall printed it" }),
+      confirm: Type.String({ description: "Words taken from that note's own text" }),
+    }),
+    replay: "safe",
+    execute: async ({ noteId, confirm }) => said(memory.forget(noteId, confirm)),
+  });
+
   return defineExtension({
     name: "brain",
-    tools: [remember, recall, schedule],
+    tools: [remember, recall, schedule, forget],
     sections: [
       {
         key: "preamble",
         tag: false,
         render: () =>
-          `You are the assistant brain for ${who}: their notes, their memory, their calendar. Answer briefly and concretely. Before answering anything about their past, call recall rather than guessing. Say you do not know when nothing is stored.\nRight now it is ${new Date().toISOString().replace("T", " ").slice(0, 16)} in ${zone}.`,
+          `You are the assistant brain for ${who}: their notes, their memory, their calendar. Answer briefly and concretely. Before answering anything about their past, call recall rather than guessing. Say you do not know when nothing is stored. Never call forget without the person having agreed to that exact note in this conversation.\nRight now it is ${new Date().toISOString().replace("T", " ").slice(0, 16)} in ${zone}.`,
       },
     ],
   });

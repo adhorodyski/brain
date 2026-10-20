@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
     "webhook": "bash ./scripts/set-webhook.sh"
   },
   "dependencies": {
