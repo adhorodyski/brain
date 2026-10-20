@@ -95,13 +95,21 @@ Local notes live in simulated storage, so deploying starts with an empty brain.
 
 ### 4. Set your vars and secrets, then deploy
 
-Edit `MODEL_BASE_URL` and `MODEL_ID` in `wrangler.jsonc`. They are plain vars rather than secrets because
-neither is sensitive, and a deploy carries them. Locally, `.dev.vars` overrides them, which is the easiest
-way to try a second provider without touching committed config.
+`MODEL_BASE_URL` and `MODEL_ID`, the two from step 2, live on the worker rather than in this repo, so nothing
+here needs editing when you switch provider:
 
 ```sh
 npx wrangler login
 
+npx wrangler deploy --var MODEL_BASE_URL:https://your-provider.example/v1 --var MODEL_ID:your-model-name
+```
+
+`wrangler.jsonc` sets `keep_vars: true`, which is what lets those survive the next `npm run deploy`. Without
+it a deploy deletes every var the config does not name, and the brain then refuses every call with
+`Set these worker vars: MODEL_BASE_URL, MODEL_ID` while `/health` keeps answering 200. Secrets are never
+deleted by a deploy, so these two are the only ones that need the flag.
+
+```sh
 npx wrangler secret put MODEL_API_KEY
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put TELEGRAM_CHAT_ID
@@ -113,8 +121,11 @@ npx wrangler deploy
 ```
 
 Each `secret put` prompts for a value and publishes a worker version as a side effect, so set them before
-`deploy` and the first version serving traffic is already configured. Secrets live on the worker rather than
-on a version, so you set them once and later deploys keep them.
+`deploy` and the first version serving traffic is already configured.
+
+`--var` and the dashboard both set these outside the version, so `npx wrangler deployments rollback` restores
+code without restoring them. A wrong `MODEL_BASE_URL` fails at request time rather than at once, because the
+only check on the value is that it is set.
 
 The first deploy needs `migrations: [{ tag: "v1", new_sqlite_classes: ["Assistant"] }]`, which is already in
 `wrangler.jsonc`. Without it the worker deploys cleanly and then fails at runtime with "no such Durable
@@ -169,7 +180,8 @@ available" every time.
 
 ### Optional vars
 
-Put these in `wrangler.jsonc` under `vars`, or in `.dev.vars` while developing.
+Set these with `wrangler deploy --var NAME:value` or in the dashboard, and once `keep_vars` is set they need
+no `--var` on later deploys. Put them in `.dev.vars` while developing locally.
 
 | Var | Default | |
 |---|---|---|

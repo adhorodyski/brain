@@ -1,5 +1,5 @@
-# Copy to .dev.vars for `npm run dev`. On the deployed worker these are secrets,
-# except the two MODEL_* settings you can keep as plain text.
+# Copy to .dev.vars for `npm run dev`. On the deployed worker, TELEGRAM_*, BRAIN_TOKEN and
+# MODEL_API_KEY are secrets, and the two MODEL_ settings below are vars set outside the repo.
 
 # Any OpenAI-compatible chat endpoint. MODEL_ID goes on the wire unchanged.
 MODEL_BASE_URL=https://your-provider.example/v1

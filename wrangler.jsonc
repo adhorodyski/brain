@@ -5,11 +5,9 @@
   "compatibility_date": "2026-10-19",
   "compatibility_flags": ["nodejs_compat"],
 
-  // Your model endpoint. Secrets live in `wrangler secret put`, not here.
-  "vars": {
-    "MODEL_BASE_URL": "https://your-provider.example/v1",
-    "MODEL_ID": "your-model-name"
-  },
+  // A deploy deletes every var the config does not name, so this keeps the MODEL_* values set with
+  // `wrangler deploy --var` or in the dashboard. Secrets are never deleted by a deploy.
+  "keep_vars": true,
 
   // Workers AI turns a fetched page into Markdown. Format conversions are free; the free tier also
   // allows 10,000 neurons a day.

@@ -30,7 +30,7 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 | `src/store.ts` | Notes and plans in SQLite. Module-scope factory, so the door and the brain read one table. |
 | `src/door.ts` | The MCP mount: the tools the bearer token unlocks, and `isTrusted()`. |
 | `src/telegram.ts` | `send()`, with the 4096-character split. |
-| `src/model.ts` | Declares one provider from `MODEL_*` vars. Any OpenAI-compatible endpoint. The `MODEL_ID` you declare is the string sent on the wire. |
+| `src/model.ts` | Declares one provider from the `MODEL_*` vars, which live on the worker rather than in `wrangler.jsonc`. Any OpenAI-compatible endpoint. The `MODEL_ID` you declare is the string sent on the wire. |
 | `src/env.d.ts` | The `Env` shape, uncommented by rule. Every var is described in the README's optional vars table or in setup step 4. |
 | `scripts/set-webhook.sh` | Sets the Telegram webhook URL and shared secret. |
 
@@ -87,6 +87,11 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   hand out: `ask` cannot be one, because `PiSubmitOptions` accepts only `session`, `operationId`, and
   `whenBusy` and so cannot restrict a turn's tools. An `ask` answer comes from an agent holding write
   tools whoever asks. If a read-only mount ever returns, it is `recall` and `web_fetch` alone.
+- **`MODEL_BASE_URL` and `MODEL_ID` are set outside the repo**, with `wrangler deploy --var NAME:value` or
+  in the dashboard, and `wrangler.jsonc` carries `keep_vars: true` so a deploy does not delete them. Drop
+  that flag and the next deploy wipes both, after which every call answers `Set these worker vars: ...`
+  while `/health` keeps answering 200, so the dashboard looks healthy with a dead brain. Neither value is
+  secret, but keeping them off `main` is what makes `wrangler deploy` from a clean checkout safe.
 - **`web_fetch` is Cloudflare's, not ours.** `agents/webfetch/pi` brings the fence, the host policy, the
   redirect re-checks, the byte cap, and the windowing, and it is the name models already know. Roll your
   own and you inherit the job of fencing untrusted text again. Conversion runs through the `AI` binding,
