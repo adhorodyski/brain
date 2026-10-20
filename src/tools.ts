@@ -1,11 +1,14 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import { MAX_NOTE, WHEN_HELP, type Memory } from "./store";
+import type { Memory } from "./store";
 
 export const DEFAULT_BRAIN = "brain";
 export const DEFAULT_TIMEZONE = "UTC";
+export const MAX_NOTE = 300;
 
 export const BRAIN_NAME = (env: { BRAIN_NAME?: string }) => env.BRAIN_NAME ?? DEFAULT_BRAIN;
+
+export const WHEN_HELP = `Give "at" as an ISO 8601 datetime with its offset (e.g. 2026-03-04T09:00:00+01:00), or "every" as a 5-field cron expression (e.g. "0 8 * * 1-5").`;
 
 const said = (text: string) => ({ output: [{ type: "text" as const, text }] });
 

@@ -7,8 +7,8 @@ Notes for agents working in this repo. Read [README.md](README.md) for setup.
 **No code comments unless one records third-party behaviour we cannot change.** A comment that restates
 what the next line does is a smell: rename, extract, or type until it is unnecessary, and if renaming
 cannot help, write the clearer structure and record nothing. What a reader must know that no construct
-can hold lives here, not in the source. `src/` currently carries six such notes: the two in `src/web.ts`
-and the one in `src/model.ts` for what pi, `agents`, and OpenAI-compatible endpoints do, the scheduler
+can hold lives here, not in the source. What survives in `src/` is exactly that: what pi, `agents`, and
+OpenAI-compatible endpoints do (the two notes in `src/web.ts` and the one in `src/model.ts`), the scheduler
 note on `MemoryHost.arm`, the Telegram retry note in `src/index.ts`, and the empty-list note in
 `src/web.ts`. The whole `Env` interface is uncommented because the README's vars table already says what
 every var does — add a var there, not as a doc comment here.
@@ -23,12 +23,12 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 
 | File | Contents |
 |---|---|
-| `src/index.ts` | The three routes (`/health`, `/telegram/webhook`, `/mcp`) and both guards. The Telegram route verifies the webhook secret, allowlists the chat ID, and pushes the turn onto the Agent's durable queue. |
+| `src/index.ts` | The routes (`/health`, `/telegram/webhook`, `/mcp`) and their guards. The Telegram route verifies the webhook secret, allowlists the chat ID, and pushes the turn onto the Agent's durable queue. |
 | `src/assistant.ts` | The Agent class. Builds the memory store, installs the tools, owns `PiHarness`, `turnWithin()`, and every door-facing method. The `PiHarness` seam lives here and nowhere else. |
-| `src/tools.ts` | `defineTool` definitions for the four tools the brain sees (`remember`, `recall`, `schedule`, `forget`) and the prompt preamble, plus `BRAIN_NAME`. |
+| `src/tools.ts` | `defineTool` definitions for the tools the brain sees, the prompt preamble, `MAX_NOTE`, `WHEN_HELP`, and `BRAIN_NAME`. |
 | `src/web.ts` | Cloudflare's `web_fetch` installed for the brain, the same tool run once for the door's `readPage()`, one `webPolicy()` behind both, and `renamesContentToOutput()` to let Cloudflare's adapter run on pi-durable 1.3. |
-| `src/store.ts` | Notes and plans in SQLite, plus the `MAX_NOTE` / `WHEN_HELP` strings the tool descriptions quote. Module-scope factory, so the door and the brain read one table. |
-| `src/door.ts` | The MCP mount: the six tools the bearer token unlocks, and `isTrusted()`. |
+| `src/store.ts` | Notes and plans in SQLite. Module-scope factory, so the door and the brain read one table. |
+| `src/door.ts` | The MCP mount: the tools the bearer token unlocks, and `isTrusted()`. |
 | `src/telegram.ts` | `send()`, with the 4096-character split. |
 | `src/model.ts` | Declares one provider from `MODEL_*` vars. Any OpenAI-compatible endpoint. The `MODEL_ID` you declare is the string sent on the wire. |
 | `src/env.d.ts` | The `Env` shape, uncommented by rule. Every var is described in the README's optional vars table or in setup step 4. |
@@ -93,14 +93,14 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   allows 10,000 neurons a day. The door calls the brain's own tool rather than a second fetch path, so
   both doors word a page and a refusal identically and `isError` survives the trip — keep it that way,
   and keep `NO_TURN_API` honest: the adapter takes that argument as `_api` and never reads it.
-- **Every tool is `replay: "safe"`.** The three SQLite tools are keyed on the call that made it —
+- **Every tool is `replay: "safe"`.** The SQLite tools are keyed on the call that made it —
   `api.taskId` and `api.callId` form the dedupe key (the key shape borrowed from pi-pocket, MIT), checked
   inside the same transaction as the write — so rerunning one after an eviction changes nothing.
   `web_fetch` is safe for a different reason: it has no effect of ours to redo, and a completed result is
   stored and not refetched. A tool that charges or writes outside this DO must be `replay: "unsafe"`.
 - **The tool list is the whole permission model.** Pi Durable has no approval step for tool calls, so
-  nothing can widen what the brain does at runtime. `ask` is door-only and runs a full turn; the other
-  five are direct SQLite reads and writes or one public fetch. There is no shell, no code execution, and
+  nothing can widen what the brain does at runtime. `ask` is door-only and runs a full turn; the rest
+  are direct SQLite reads and writes or a public fetch. There is no shell, no code execution, and
   no credentials in anyone's accounts. What a page holds reaches the transcript only inside
   `<untrusted_web_content>`, with a nested closing tag escaped, and loopback, private, and link-local
   hosts are refused however `WEB_ALLOWED_HOSTS` reads — so `169.254.169.254` and `localhost` are
@@ -112,15 +112,11 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 ## Checks
 
 ```sh
-npm run check                                   # worker and test tsc, must stay clean
-npm test                                        # store behaviour, in-memory SQLite
+npm run check                                   # tsc, must stay clean
 npx wrangler deploy --dry-run                   # must bundle; watch gzipped size
 ```
 
-`npm test` runs `test/*.test.ts` on `node:sqlite` against the real `SCHEMA`, which is why `src/store.ts`
-imports nothing worker-side: `MAX_NOTE` and `WHEN_HELP` live there so the store stands alone. `test/` type
-checks against `@types/node` in `tsconfig.test.json`, leaving `tsconfig.json` typed for the worker alone.
-
 To exercise the doors locally, put values in `.dev.vars`, run `npm run dev`, and drive `/mcp` with curl
-using `tools/list` and `tools/call`. Expect six tools. A wrong token should 401 before any tool runs, and
-`web_fetch` on `http://169.254.169.254/` should come back refused rather than fetched.
+using `tools/list` and `tools/call`, which answers with every tool the mount offers. A wrong token should
+401 before any tool runs, and `web_fetch` on `http://169.254.169.254/` should come back refused rather
+than fetched.

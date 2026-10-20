@@ -90,7 +90,7 @@ curl -s localhost:8787/mcp -X POST \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-`/health` returns `{"brain":"brain"}`, the MCP call lists six tools, and removing the header returns 401.
+`/health` returns `{"brain":"brain"}`, the MCP call answers with every tool the mount offers, and removing the header returns 401.
 Local notes live in simulated storage, so deploying starts with an empty brain.
 
 ### 4. Set your vars and secrets, then deploy

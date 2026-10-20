@@ -1,6 +1,4 @@
-export const MAX_NOTE = 300;
-
-export const WHEN_HELP = `Give "at" as an ISO 8601 datetime with its offset (e.g. 2026-03-04T09:00:00+01:00), or "every" as a 5-field cron expression (e.g. "0 8 * * 1-5").`;
+import { MAX_NOTE, WHEN_HELP } from "./tools";
 
 export type Note = { noteId: number; text: string; tags: string; storedAt: string };
 

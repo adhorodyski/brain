@@ -1,10 +1,10 @@
 import { Agent } from "agents";
 import { PiHarness } from "agents/harness/pi";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
-import { brainExtension, BRAIN_NAME, DEFAULT_TIMEZONE } from "./tools";
+import { brainExtension, BRAIN_NAME, WHEN_HELP, DEFAULT_TIMEZONE } from "./tools";
 import { brainWebTool } from "./web";
 import { brainModels, PROVIDER_ID } from "./model";
-import { createMemory, SCHEMA, WHEN_HELP, type Memory } from "./store";
+import { createMemory, SCHEMA, type Memory } from "./store";
 import { send } from "./telegram";
 
 const ASK_BUDGET_MS = 90_000;
