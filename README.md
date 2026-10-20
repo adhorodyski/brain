@@ -111,6 +111,11 @@ npx wrangler secret list
 npx wrangler deploy
 ```
 
+`TELEGRAM_CHAT_ID` is the numeric id of the chat you write to, not your username and not the bot's id. Message
+the bot, then read the id off a live webhook with `npx wrangler tail`: the first message logs `dropped message
+from chat <id>` and you can copy it. A wrong id fails quietly. The worker answers Telegram `ok` and drops the
+update, so the bot looks dead while the webhook keeps arriving healthy.
+
 Each `secret put` prompts for a value and publishes a worker version as a side effect, so set them before
 `deploy` and the first version serving traffic is already configured. Secrets live on the worker rather than
 on a version, so you set them once and later deploys keep them.

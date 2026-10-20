@@ -22,8 +22,13 @@ export default {
       const text = update?.message?.text?.trim();
       const chatId = String(update?.message?.chat?.id ?? "");
 
+      if (text && chatId !== env.TELEGRAM_CHAT_ID) {
+        console.warn(`telegram: dropped message from chat ${chatId}, TELEGRAM_CHAT_ID is ${env.TELEGRAM_CHAT_ID ?? "unset"}`);
+        return new Response("ok");
+      }
+
       // Telegram retries a webhook that stays silent, well before a brain turn finishes.
-      if (text && chatId === env.TELEGRAM_CHAT_ID) {
+      if (text) {
         const brain = await getAgentByName(env.Assistant, BRAIN_NAME(env));
         await brain.queue("deliverTurn", { text, chatId, operationId: `tg${update!.update_id}` });
       }
