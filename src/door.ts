@@ -76,15 +76,15 @@ export function door(env: Env) {
       );
 
       server.registerTool(
-        "revise",
+        "patch",
         {
-          title: "Revise note",
+          title: "Patch note",
           description:
             "Change one stored note in place. Takes the #number recall printed, a few words of that note's own text, and the whole new text; nothing changes unless both point at the same note. Prefer this over forget plus remember when a fact changed.",
           inputSchema: z.object({ noteId: z.number().int().min(1), confirm: z.string(), text: z.string() }),
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
         },
-        async ({ noteId, confirm, text }) => said(await brain().revise(noteId, confirm, text)),
+        async ({ noteId, confirm, text }) => said(await brain().patch(noteId, confirm, text)),
       );
 
       server.registerTool(

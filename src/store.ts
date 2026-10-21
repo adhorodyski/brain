@@ -29,7 +29,7 @@ export function flat(text: string): string {
 }
 
 const CHARS_PER_TOKEN = 4;
-export const TOKENS = (text: string): number => Math.ceil(text.length / CHARS_PER_TOKEN);
+const TOKENS = (text: string): number => Math.ceil(text.length / CHARS_PER_TOKEN);
 
 function accepted(text: string): string {
   const body = flat(text);
@@ -70,14 +70,18 @@ export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
     items: { text: string; tags?: string; tier?: Tier }[],
     batch: string,
   ): string => {
-    const bodies = items.map((item) => ({ text: accepted(item.text), tags: flat(item.tags ?? ""), tier: item.tier ?? ("note" as Tier) }));
+    const bodies = items.map((item) => ({
+      text: accepted(item.text),
+      tags: flat(item.tags ?? ""),
+      tier: item.tier ?? "note",
+    }));
     const incoming = bodies.filter((body) => body.tier === "core").reduce((sum, body) => sum + TOKENS(body.text), 0);
 
     if (incoming > 0) {
       const used = coreUsed();
       if (used + incoming > coreBudgetTokens) {
         throw new Error(
-          `core is at ${used}/${coreBudgetTokens} tokens and this adds ${incoming}: revise or forget a core item first, or save these as notes.`,
+          `core is at ${used}/${coreBudgetTokens} tokens and this adds ${incoming}: patch or forget a core item first, or save these as notes.`,
         );
       }
     }
@@ -87,15 +91,16 @@ export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
     if (stored === 0) return "Nothing new stored.";
 
     const after = coreUsed();
-    const pressure =
-      after === 0 || after * 5 < coreBudgetTokens * 4
-        ? ""
-        : ` core now ${Math.round((after / coreBudgetTokens) * 100)}% (${after}/${coreBudgetTokens} tokens) — revise or forget before adding more.`;
-    return `Remembered ${stored} note(s).${pressure}`;
+    if (after === 0 || after * 5 < coreBudgetTokens * 4) return `Remembered ${stored} note(s).`;
+
+    const percentFull = Math.round((after / coreBudgetTokens) * 100);
+    return `Remembered ${stored} note(s). core now ${percentFull}% (${after}/${coreBudgetTokens} tokens) — patch or forget before adding more.`;
   };
 
   const coreBlock = (): string => {
-    const rows = host.sql("SELECT rowid AS noteId, text, at FROM notes WHERE tier = 'core' ORDER BY at ASC, rowid ASC") as unknown as Note[];
+    const rows = host.sql(
+      "SELECT rowid AS noteId, text FROM notes WHERE tier = 'core' ORDER BY at ASC, rowid ASC",
+    ) as unknown as Pick<Note, "noteId" | "text">[];
     const used = coreUsed();
     const head = `core [${Math.round((used / coreBudgetTokens) * 100)}% — ${used}/${coreBudgetTokens} tokens]`;
     if (rows.length === 0) return `${head}\nNothing in core yet.`;
@@ -105,7 +110,6 @@ export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
   return {
     rememberBatch,
     coreBlock,
-    coreUsed,
 
     search(query: string, limit = 8): { lines: string[]; total: number } {
       const words = query
@@ -131,7 +135,7 @@ export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
         total: rows.length,
         lines: rows.map(
           (row) =>
-            `#${row.noteId} ${row.text}${row.tags ? ` [${row.tags}]` : ""}${row.tier === "core" ? " (core)" : ""} (${row.storedAt.slice(0, 10)})`,
+            `#${row.noteId} ${row.text}${row.tags ? ` [${row.tags}]` : ""}${coreTag(row.tier)} (${row.storedAt.slice(0, 10)})`,
         ),
       };
     },
@@ -148,7 +152,7 @@ export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
       return `Forgot #${row.noteId}: "${row.text}"`;
     },
 
-    revise(noteId: number, confirm: string, text: string): string {
+    patch(noteId: number, confirm: string, text: string): string {
       const wanted = flat(confirm).toLowerCase();
       if (!wanted) return "Name a few words of the note to confirm it — nothing was changed.";
 
@@ -158,22 +162,22 @@ export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
 
       if (!agrees(row, wanted)) {
         // Run again after a restart, this call's own rewrite is what left the confirm words gone.
-        if (row.text === body) return `Revised #${row.noteId} already reads "${body}"${row.tier === "core" ? " (core)" : ""}.`;
+        if (row.text === body) return `Patched #${row.noteId} already reads "${body}"${coreTag(row.tier)}.`;
         return mismatch(noteId, row, "changed");
       }
 
       if (row.tier === "core") {
-        const freed = TOKENS(row.text);
-        const after = coreUsed() - freed + TOKENS(body);
+        const used = coreUsed();
+        const after = used - TOKENS(row.text) + TOKENS(body);
         if (after > coreBudgetTokens) {
           throw new Error(
-            `core is at ${coreUsed()}/${coreBudgetTokens} tokens and this rewrite lands on ${after}: shorten it, or revise it into a note instead.`,
+            `core is at ${used}/${coreBudgetTokens} tokens and this rewrite lands on ${after}: shorten it, or patch it into a note instead.`,
           );
         }
       }
 
       host.sql("UPDATE notes SET text = ? WHERE rowid = ?", [body, row.noteId]);
-      return `Revised #${row.noteId}: "${row.text}" → "${body}"${row.tier === "core" ? " (core)" : ""}`;
+      return `Patched #${row.noteId}: "${row.text}" → "${body}"${coreTag(row.tier)}`;
     },
 
     async add(input: { id: string; message: string; at?: string; every?: string }): Promise<string> {
@@ -239,6 +243,10 @@ export type Memory = ReturnType<typeof createMemory>;
 type Plan = { key: string; message: string; schedule_id: string | null };
 
 type Stored = { noteId: number; text: string; tier: Tier };
+
+function coreTag(tier: Tier): string {
+  return tier === "core" ? " (core)" : "";
+}
 
 /** A confirm matches the note's own text, or the caller reports the mismatch instead of acting. */
 function agrees(row: Stored, wanted: string): boolean {

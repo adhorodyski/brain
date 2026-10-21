@@ -22,7 +22,7 @@ export class Assistant extends Agent<Env> {
     const exec = (statement: string, values?: unknown[]) =>
       Array.from(this.ctx.storage.sql.exec(statement, ...(values ?? [])));
 
-    for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
+    for (const statement of SCHEMA) exec(statement);
     migrate(exec);
 
     this.memory = createMemory(
@@ -78,8 +78,8 @@ export class Assistant extends Agent<Env> {
     return this.memory.rememberBatch(items, `door${crypto.randomUUID()}`);
   }
 
-  async revise(noteId: number, confirm: string, text: string): Promise<string> {
-    return this.memory.revise(noteId, confirm, text);
+  async patch(noteId: number, confirm: string, text: string): Promise<string> {
+    return this.memory.patch(noteId, confirm, text);
   }
 
   async forget(noteId: number, confirm: string): Promise<string> {

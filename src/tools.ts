@@ -1,6 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import type { Memory, Tier } from "./store";
+import type { Memory } from "./store";
 
 export const DEFAULT_BRAIN = "brain";
 export const DEFAULT_TIMEZONE = "UTC";
@@ -20,7 +20,7 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
   const remember = defineTool({
     name: "remember",
     description:
-      "Store durable facts so they can be recalled months from now. One self-contained fact per item — never chatter about the conversation itself. tier core is for what must be known without searching: who people are, where things are, standing instructions. It is budgeted and shown every turn, so keep it small and revise in place rather than appending. tier note (the default) is for everything else and is found by recall.",
+      "Store durable facts so they can be recalled months from now. One self-contained fact per item — never chatter about the conversation itself. tier core is for what must be known without searching: who people are, where things are, standing instructions. It is budgeted and shown every turn, so keep it small and patch in place rather than appending. tier note (the default) is for everything else and is found by recall.",
     parameters: Type.Object({
       items: Type.Array(
         Type.Object({
@@ -41,7 +41,7 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
       ),
     }),
     replay: "safe",
-    execute: async ({ items }, api) => said(memory.rememberBatch(items as { text: string; tags?: string; tier?: Tier }[], `${api.taskId}:${api.callId}`)),
+    execute: async ({ items }, api) => said(memory.rememberBatch(items, `${api.taskId}:${api.callId}`)),
   });
 
   const recall = defineTool({
@@ -93,8 +93,8 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
     execute: async ({ noteId, confirm }) => said(memory.forget(noteId, confirm)),
   });
 
-  const revise = defineTool({
-    name: "revise",
+  const patch = defineTool({
+    name: "patch",
     description:
       "Change one stored note in place. Pass the #number, a few words of the note's own text to confirm it, and the whole new text. Use this instead of forget plus remember whenever a fact changed: an appended second note leaves two contradictory versions and the older one keeps winning.",
     parameters: Type.Object({
@@ -103,18 +103,18 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
       text: Type.String({ description: `The note's new full text, ${MAX_NOTE} characters at most` }),
     }),
     replay: "safe",
-    execute: async ({ noteId, confirm, text }) => said(memory.revise(noteId, confirm, text)),
+    execute: async ({ noteId, confirm, text }) => said(memory.patch(noteId, confirm, text)),
   });
 
   return defineExtension({
     name: "brain",
-    tools: [remember, recall, revise, schedule, forget],
+    tools: [remember, recall, patch, schedule, forget],
     sections: [
       {
         key: "preamble",
         tag: false,
         render: () =>
-          `You are the assistant brain for ${who}: their notes, their memory, their calendar. Answer briefly and concretely. Before answering anything about their past, call recall rather than guessing. Say you do not know when nothing is stored. When a stored fact changes, revise that note rather than adding another. Never call forget without the person having agreed to that exact note in this conversation.\nRight now it is ${new Date().toISOString().replace("T", " ").slice(0, 16)} in ${zone}.`,
+          `You are the assistant brain for ${who}: their notes, their memory, their calendar. Answer briefly and concretely. Before answering anything about their past, call recall rather than guessing. Say you do not know when nothing is stored. When a stored fact changes, patch that note rather than adding another. Never call forget without the person having agreed to that exact note in this conversation.\nRight now it is ${new Date().toISOString().replace("T", " ").slice(0, 16)} in ${zone}.`,
       },
       { key: "core", tag: true, render: () => memory.coreBlock() },
     ],

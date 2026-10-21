@@ -28,7 +28,7 @@ or any other client that can post JSON.
 |---|---|
 | `remember` | Notes, written once, searchable years later. A retried write lands once, not twice. `tier: "core"` holds what must be known without searching. |
 | `recall` | Matching lines straight from SQLite, by text or by tag. Costs no model call. |
-| `revise` | Changes one note in place, behind the same number-and-words agreement `forget` needs. |
+| `patch` | Changes one note in place, behind the same number-and-words agreement `forget` needs. |
 | `ask` | A reasoned answer drawn from your notes. The only tool that costs an agent turn. |
 | `schedule` | One-off and recurring reminders, delivered by a Durable Object alarm with nothing of yours running. Lists and cancels. |
 | `forget` | Deletes one note, and only the note both its recall number and a quoted word of its text agree on. |
@@ -174,7 +174,7 @@ to skip a discovery round trip:
 "description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",
 "toolExposure": {
   "ask": "direct", "remember": "direct", "schedule": "direct",
-  "recall": "codemode", "revise": "codemode", "forget": "codemode", "web_fetch": "codemode"
+  "recall": "codemode", "patch": "codemode", "forget": "codemode", "web_fetch": "codemode"
 }
 ```
 
