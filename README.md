@@ -159,9 +159,21 @@ The reply arrives once and never gets edited afterward.
 pi mcp add brain --url https://<your-worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
 ```
 
-That writes to `~/.pi/agent/mcp.json`. Keep it there. Pi silently skips a project-level `.pi/mcp.json` in
-untrusted folders, and a same-named project entry replaces your user one. Add these keys to the `brain` entry
-to skip a discovery round trip:
+That writes to `~/.pi/agent/mcp.json`. Keep it there. It puts `${BRAIN_TOKEN}` in the file and reads it
+from your shell, so every process pi spawns inherits the secret. To keep it out of the environment instead,
+put a command in the header and let pi run it per connection:
+
+```jsonc
+"headers": { "Authorization": "!echo Bearer $(security find-generic-password -s brain-mcp -w)" }
+```
+
+Store the token once with `security add-generic-password -U -s brain-mcp -a "$USER" -w` and rotate it there
+alongside the worker secret. The whole header value must be the command, and a missing keychain item is a
+connection failure rather than a prompt. Either way, an entry with no `Authorization` header at all is worse
+than both: pi then treats the worker as an OAuth server, caches the 401, and reports `needs sign-in` forever,
+because this worker answers `401 unauthorized` and serves no `/.well-known/oauth-*` document. Pi
+silently skips a project-level `.pi/mcp.json` in untrusted folders, and a same-named project entry
+replaces your user one. Add these keys to the `brain` entry to skip a discovery round trip:
 
 ```jsonc
 "description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",

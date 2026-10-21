@@ -69,6 +69,12 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   `search` reads the note column back as `storedAt` so the row type says which; keep the alias if you
   touch that query, because SQLite hands back the alias verbatim and a snake_case alias silently
   undefineds the date in every recall line.
+- **The `/mcp` entry in a client must carry an `Authorization` header.** Pi treats a URL server with none as an
+  OAuth server, caches the `401` from `isTrusted()`, and reports `needs sign-in` for good. This worker serves no
+  `/.well-known/oauth-*` document, so that sign-in can never finish. On a mac, the header can be a command
+  (`"!echo Bearer $(security find-generic-password -s brain-mcp -w)"`), which keeps the secret out of the file and
+  out of every child process's environment. Pi resolves a header command with a 10 second timeout, so nothing that
+  waits on a person belongs in one.
 - **The `#number` in a recall line is a SQLite `rowid`, and rowids get reused.** Deleting the highest
   note frees its number for the next note written, so a handle read from a stale recall can point at
   unrelated text. That is why `forget` needs the number *and* words from the note itself and refuses
