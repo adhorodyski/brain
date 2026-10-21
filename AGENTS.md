@@ -25,9 +25,9 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 |---|---|
 | `src/index.ts` | The routes (`/health`, `/telegram/webhook`, `/mcp`) and their guards. The Telegram route verifies the webhook secret, allowlists the chat ID, and pushes the turn onto the Agent's durable queue. |
 | `src/assistant.ts` | The Agent class. Builds the memory store, installs the tools, owns `PiHarness`, `turnWithin()`, and every door-facing method. The `PiHarness` seam lives here and nowhere else. |
-| `src/tools.ts` | `defineTool` definitions for the tools the brain sees, the prompt preamble, `MAX_NOTE`, `WHEN_HELP`, and `BRAIN_NAME`. |
+| `src/tools.ts` | `defineTool` definitions for the tools the brain sees, the `preamble` and `core` prompt sections, `MAX_NOTE`, `DEFAULT_CORE_TOKENS`, `WHEN_HELP`, and `BRAIN_NAME`. |
 | `src/web.ts` | Cloudflare's `web_fetch` installed for the brain, the same tool run once for the door's `readPage()`, one `webPolicy()` behind both, and `renamesContentToOutput()` to let Cloudflare's adapter run on pi-durable 1.3. |
-| `src/store.ts` | Notes and plans in SQLite. Module-scope factory, so the door and the brain read one table. |
+| `src/store.ts` | Notes in two tiers, and plans, in SQLite. Also `flat()`, the `core` budget, `SCHEMA`, and `migrate()`. Module-scope factory, so the door and the brain read one table. |
 | `src/door.ts` | The MCP mount: the tools the bearer token unlocks, and `isTrusted()`. |
 | `src/telegram.ts` | `send()`, with the 4096-character split. |
 | `src/model.ts` | Declares one provider from the `MODEL_*` vars, which live on the worker rather than in `wrangler.jsonc`. Any OpenAI-compatible endpoint. The `MODEL_ID` you declare is the string sent on the wire. |
@@ -49,7 +49,7 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 - **`createModels()` takes options, not a provider array.** Use `createModels()` then `setProvider()`.
 - **Only `@callable` methods and plain public methods reachable from worker code cross the DO RPC
   boundary.** `stub.memory` is private and cannot be read from `src/door.ts`. That is why the door calls the
-  thin methods at the bottom of `Assistant` (`recall`, `remember`, `plan`, `ask`).
+  thin methods at the bottom of `Assistant` (`recall`, `remember`, `patch`, `forget`, `plan`, `ask`).
 - **`this.schedule(when, "callbackName", payload)` takes the callback as a string** naming a method on the
   class. `planFired` is that method.
 - **One conversation thread, the root session.** Do not add `sessions.create()` or `fork()`. Every door
@@ -69,6 +69,26 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
   `search` reads the note column back as `storedAt` so the row type says which; keep the alias if you
   touch that query, because SQLite hands back the alias verbatim and a snake_case alias silently
   undefineds the date in every recall line.
+- **`patch` is `replay: "safe"` because it recognises its own work.** Its `confirm` words come from
+  the text it is about to replace, so replaying a committed `patch` fails that check and would report
+  a mismatch for a change that already landed. The `row.text === body` branch ahead of the refusal is
+  what makes the rerun answer truthfully. `forget` needs no such branch, because deleting a row that is
+  already gone deletes nothing.
+- **`notes.tier` decides whether a note costs every future request.** `core` renders into the `core`
+  prompt section on every turn and is bounded by `CORE_TOKENS`, while `note` is uncapped and reachable
+  only through `recall`. Keep the budget check inside `rememberBatch` and `patch` rather than in the
+  tool, so the MCP door cannot walk past it either, and keep the refusal a throw. A write that
+  truncates quietly leaves the brain quoting half a fact forever. Do not move a note into `core` to fix
+  a recall miss, because that trades a search failure for a permanent tax.
+- **`flat()` runs on every note and tag written, and on every line rendered into the prompt.** It
+  collapses whitespace and strips invisible codepoints, so a note cannot carry a hidden instruction
+  into a section the model re-reads each turn, and cannot break the one-line shape that the `core`
+  block and recall lines depend on. It also runs on the way out, for rows stored before it existed.
+- **`search` matches tags as well as text, and joins its words with OR.** Both are load-bearing and
+  invisible when they break. A tag no query can reach is decoration, and AND-ing the whole query means
+  a long question about one fact returns nothing. The `hits` score is why the argument list passes
+  `perWord` twice: the CASE block and the WHERE block each consume their own bindings, so one spread
+  misbinds silently and matches nothing.
 - **The `#number` in a recall line is a SQLite `rowid`, and rowids get reused.** Deleting the highest
   note frees its number for the next note written, so a handle read from a stale recall can point at
   unrelated text. That is why `forget` needs the number *and* words from the note itself and refuses
@@ -84,6 +104,18 @@ today, and a door is only a guard plus a route, so the count is not load-bearing
 
 ## Decisions worth knowing before you change them
 
+- **The two tiers follow convergent practice rather than invention.** pi-pocket bounds its lessons and
+  injects them, Hermes caps `MEMORY.md` at 2,200 characters and prints the fill percentage, and
+  OpenClaw budgets its curated files and gates what promotes into them. All four landed on a small
+  always-in-context core over a large store behind a tool. The inversion this replaced, with everything
+  in context and curated facts behind `recall`, is the failure mode to avoid reintroducing. Provenance
+  columns and an approval queue for door-initiated writes are the known next steps, deliberately not
+  taken here.
+- **`migrate()` exists because `SCHEMA` cannot change a live table.** `CREATE TABLE IF NOT EXISTS` does
+  nothing against the deployed brain, so `tier` arrives by `ALTER TABLE` guarded on
+  `pragma_table_info`, which DO SQLite answers. The `'note'` default puts every pre-existing row in the
+  tier that costs nothing per turn. A wrong default would silently inflate every request the moment it
+  deployed.
 - **Writes from the terminal are direct SQLite writes**, not turns through the brain. That is what keeps a
   note at roughly 80 tokens and stops the brain's transcript growing on every write. Do not route a write
   tool through `ask`.

@@ -26,12 +26,19 @@ or any other client that can post JSON.
 
 | Tool | |
 |---|---|
-| `remember` | Notes, written once, searchable years later. A retried write lands once, not twice. |
-| `recall` | Matching lines straight from SQLite. Costs no model call. |
+| `remember` | Notes, written once, searchable years later. A retried write lands once, not twice. `tier: "core"` holds what must be known without searching. |
+| `recall` | Matching lines straight from SQLite, by text or by tag. Costs no model call. |
+| `patch` | Changes one note in place, behind the same number-and-words agreement `forget` needs. |
 | `ask` | A reasoned answer drawn from your notes. The only tool that costs an agent turn. |
 | `schedule` | One-off and recurring reminders, delivered by a Durable Object alarm with nothing of yours running. Lists and cancels. |
 | `forget` | Deletes one note, and only the note both its recall number and a quoted word of its text agree on. |
 | `web_fetch` | A public URL as text, fenced as data. HTML and documents arrive as Markdown. |
+
+Notes come in two tiers. `core` is a small budget of what the brain must know without searching: who
+people are, where things are, standing instructions. It rides in every turn, so it is capped, prints
+its own fill percentage, and refuses a write that would not fit. `note` is everything else, uncapped
+and reachable only through `recall`. The tier that is always in context gets a price, so the tier
+that may grow is the one behind a tool call.
 
 Every door writes the same thread, so you can ask from the terminal and continue from the phone. The brain
 reads, writes notes, and talks on schedule. It holds no credentials in your accounts and cannot run code.
@@ -166,7 +173,8 @@ to skip a discovery round trip:
 ```jsonc
 "description": "The brain. Use it for anything about me: my notes, my schedule, my decisions.",
 "toolExposure": {
-  "ask": "direct", "remember": "direct", "schedule": "direct", "recall": "codemode", "forget": "codemode", "web_fetch": "codemode"
+  "ask": "direct", "remember": "direct", "schedule": "direct",
+  "recall": "codemode", "patch": "codemode", "forget": "codemode", "web_fetch": "codemode"
 }
 ```
 
@@ -188,6 +196,7 @@ no `--var` on later deploys. Put them in `.dev.vars` while developing locally.
 | `MODEL_CONTEXT_WINDOW` | `128000` | Lower it if your endpoint caps below what it advertises. |
 | `MODEL_MAX_TOKENS` | `8192` | Completion cap. Over-declaring against a real ceiling fails at request time. |
 | `MODEL_REASONING` | unset | Set `true` when the endpoint returns reasoning deltas. |
+| `CORE_TOKENS` | `1200` | Budget for the core tier, and so the size of the block sent on every turn. Raising it makes each request heavier. |
 | `BRAIN_NAME` | `brain` | Also names the Durable Object. Changing it starts an empty brain. |
 | `TIMEZONE` | `UTC` | Used for the clock in the brain's prompt and for scheduled times. |
 | `WEB_ALLOWED_HOSTS` | any public host | Comma-separated patterns a fetch may reach. `example.com` is that host alone; `*.example.com` covers subdomains. |

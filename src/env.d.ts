@@ -7,6 +7,7 @@ declare global {
     BRAIN_NAME?: string;
     TIMEZONE?: string;
     BRAIN_HOSTNAME?: string;
+    CORE_TOKENS?: string;
 
     MODEL_BASE_URL: string;
     MODEL_ID: string;
