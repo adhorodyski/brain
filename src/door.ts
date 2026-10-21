@@ -44,9 +44,15 @@ export function door(env: Env) {
         {
           title: "Remember",
           description:
-            "Store durable notes in the brain. One fact per item, self-contained, so it still makes sense in a year. Use whenever I state a fact, a decision, a preference, or a code worth keeping.",
+            "Store durable notes in the brain. One fact per item, self-contained, so it still makes sense in a year. Use whenever I state a fact, a decision, a preference, or a code worth keeping. tier core is for what must be known without searching; it is budgeted and shown every turn, so keep it small.",
           inputSchema: z.object({
-            items: z.array(z.object({ text: z.string(), tags: z.string().optional() })),
+            items: z.array(
+              z.object({
+                text: z.string(),
+                tags: z.string().optional(),
+                tier: z.union([z.literal("note"), z.literal("core")]).optional(),
+              }),
+            ),
           }),
         },
         async ({ items }) => said(await brain().remember(items)),
@@ -67,6 +73,18 @@ export function door(env: Env) {
           }),
         },
         async ({ action, message, at, every, id }) => said(await brain().plan(action, { message, at, every, id })),
+      );
+
+      server.registerTool(
+        "revise",
+        {
+          title: "Revise note",
+          description:
+            "Change one stored note in place. Takes the #number recall printed, a few words of that note's own text, and the whole new text; nothing changes unless both point at the same note. Prefer this over forget plus remember when a fact changed.",
+          inputSchema: z.object({ noteId: z.number().int().min(1), confirm: z.string(), text: z.string() }),
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+        },
+        async ({ noteId, confirm, text }) => said(await brain().revise(noteId, confirm, text)),
       );
 
       server.registerTool(

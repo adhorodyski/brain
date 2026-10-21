@@ -1,10 +1,12 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import type { Memory } from "./store";
+import type { Memory, Tier } from "./store";
 
 export const DEFAULT_BRAIN = "brain";
 export const DEFAULT_TIMEZONE = "UTC";
 export const MAX_NOTE = 300;
+export const DEFAULT_CORE_TOKENS = 1_200;
+export const CORE_TOKENS = (env: { CORE_TOKENS?: string }) => Number(env.CORE_TOKENS ?? DEFAULT_CORE_TOKENS);
 
 export const BRAIN_NAME = (env: { BRAIN_NAME?: string }) => env.BRAIN_NAME ?? DEFAULT_BRAIN;
 
@@ -18,18 +20,28 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
   const remember = defineTool({
     name: "remember",
     description:
-      "Store durable notes so they can be recalled months from now. Use for facts, decisions, preferences, codes, commitments. One self-contained fact per item — never chatter about the conversation itself.",
+      "Store durable facts so they can be recalled months from now. One self-contained fact per item — never chatter about the conversation itself. tier core is for what must be known without searching: who people are, where things are, standing instructions. It is budgeted and shown every turn, so keep it small and revise in place rather than appending. tier note (the default) is for everything else and is found by recall.",
     parameters: Type.Object({
       items: Type.Array(
         Type.Object({
-          text: Type.String({ description: `One fact, under ${MAX_NOTE} characters` }),
-          tags: Type.Optional(Type.String({ description: "Short comma-separated labels, e.g. health,kids" })),
+          text: Type.String({ description: `One fact, ${MAX_NOTE} characters at most` }),
+          tags: Type.Optional(
+            Type.String({
+              description:
+                "Short comma-separated labels, reused across notes rather than invented per note, e.g. health,nowy-sacz,client-a",
+            }),
+          ),
+          tier: Type.Optional(
+            Type.Union([Type.Literal("note"), Type.Literal("core")], {
+              description: "core: in context every turn, budgeted. note (default): searched by recall",
+            }),
+          ),
         }),
         { description: "One or more notes, all stored in this call" },
       ),
     }),
     replay: "safe",
-    execute: async ({ items }, api) => said(memory.rememberBatch(items, `${api.taskId}:${api.callId}`)),
+    execute: async ({ items }, api) => said(memory.rememberBatch(items as { text: string; tags?: string; tier?: Tier }[], `${api.taskId}:${api.callId}`)),
   });
 
   const recall = defineTool({
@@ -81,16 +93,30 @@ export function brainExtension(memory: Memory, identity: { who: string; zone: st
     execute: async ({ noteId, confirm }) => said(memory.forget(noteId, confirm)),
   });
 
+  const revise = defineTool({
+    name: "revise",
+    description:
+      "Change one stored note in place. Pass the #number, a few words of the note's own text to confirm it, and the whole new text. Use this instead of forget plus remember whenever a fact changed: an appended second note leaves two contradictory versions and the older one keeps winning.",
+    parameters: Type.Object({
+      noteId: Type.Number({ description: "The #number of the note, as recall or core printed it" }),
+      confirm: Type.String({ description: "Words taken from that note's own text" }),
+      text: Type.String({ description: `The note's new full text, ${MAX_NOTE} characters at most` }),
+    }),
+    replay: "safe",
+    execute: async ({ noteId, confirm, text }) => said(memory.revise(noteId, confirm, text)),
+  });
+
   return defineExtension({
     name: "brain",
-    tools: [remember, recall, schedule, forget],
+    tools: [remember, recall, revise, schedule, forget],
     sections: [
       {
         key: "preamble",
         tag: false,
         render: () =>
-          `You are the assistant brain for ${who}: their notes, their memory, their calendar. Answer briefly and concretely. Before answering anything about their past, call recall rather than guessing. Say you do not know when nothing is stored. Never call forget without the person having agreed to that exact note in this conversation.\nRight now it is ${new Date().toISOString().replace("T", " ").slice(0, 16)} in ${zone}.`,
+          `You are the assistant brain for ${who}: their notes, their memory, their calendar. Answer briefly and concretely. Before answering anything about their past, call recall rather than guessing. Say you do not know when nothing is stored. When a stored fact changes, revise that note rather than adding another. Never call forget without the person having agreed to that exact note in this conversation.\nRight now it is ${new Date().toISOString().replace("T", " ").slice(0, 16)} in ${zone}.`,
       },
+      { key: "core", tag: true, render: () => memory.coreBlock() },
     ],
   });
 }

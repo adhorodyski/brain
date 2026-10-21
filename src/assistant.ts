@@ -1,10 +1,10 @@
 import { Agent } from "agents";
 import { PiHarness } from "agents/harness/pi";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
-import { brainExtension, BRAIN_NAME, WHEN_HELP, DEFAULT_TIMEZONE } from "./tools";
+import { brainExtension, BRAIN_NAME, CORE_TOKENS, WHEN_HELP, DEFAULT_TIMEZONE } from "./tools";
 import { brainWebTool } from "./web";
 import { brainModels, PROVIDER_ID } from "./model";
-import { createMemory, SCHEMA, type Memory } from "./store";
+import { createMemory, migrate, SCHEMA, type Memory, type Tier } from "./store";
 import { send } from "./telegram";
 
 const ASK_BUDGET_MS = 90_000;
@@ -19,13 +19,20 @@ export class Assistant extends Agent<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
-    for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
+    const exec = (statement: string, values?: unknown[]) =>
+      Array.from(this.ctx.storage.sql.exec(statement, ...(values ?? [])));
 
-    this.memory = createMemory({
-      sql: (statement, values) => Array.from(this.ctx.storage.sql.exec(statement, ...(values ?? []))),
-      arm: (when, payload) => this.schedule(when, "planFired", payload, { idempotent: true }),
-      disarm: (scheduleId) => this.cancelSchedule(scheduleId),
-    });
+    for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
+    migrate(exec);
+
+    this.memory = createMemory(
+      {
+        sql: exec,
+        arm: (when, payload) => this.schedule(when, "planFired", payload, { idempotent: true }),
+        disarm: (scheduleId) => this.cancelSchedule(scheduleId),
+      },
+      CORE_TOKENS(this.env),
+    );
 
     const registry = createRegistry();
     registry.install(brainExtension(this.memory, { who: BRAIN_NAME(this.env), zone: this.env.TIMEZONE ?? DEFAULT_TIMEZONE }));
@@ -67,8 +74,12 @@ export class Assistant extends Agent<Env> {
     return found.total === 0 ? `Nothing stored matching "${query}".` : found.lines.join("\n");
   }
 
-  async remember(items: { text: string; tags?: string }[]): Promise<string> {
+  async remember(items: { text: string; tags?: string; tier?: Tier }[]): Promise<string> {
     return this.memory.rememberBatch(items, `door${crypto.randomUUID()}`);
+  }
+
+  async revise(noteId: number, confirm: string, text: string): Promise<string> {
+    return this.memory.revise(noteId, confirm, text);
   }
 
   async forget(noteId: number, confirm: string): Promise<string> {
