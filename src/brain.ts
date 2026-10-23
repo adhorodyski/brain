@@ -15,20 +15,6 @@ export interface Reply {
   failed: boolean;
 }
 
-export interface BrainRow {
-  id: number;
-  text: string;
-  tier?: string;
-  tags?: string;
-  scope?: string;
-  priority?: number;
-  storedAt: string;
-  source: string;
-  owner: string;
-  active?: boolean;
-  supersededKey?: string | null;
-}
-
 export interface Counts {
   notes: number;
   core: number;
@@ -36,11 +22,14 @@ export interface Counts {
   allInstructions: number;
 }
 
+type NoteRow = ReturnType<typeof noteRow>;
+type RuleRow = ReturnType<typeof ruleRow>;
+
 export interface ExportReply {
   standing: string;
   owner: string;
-  notes: BrainRow[];
-  instructions: BrainRow[];
+  notes: NoteRow[];
+  instructions: RuleRow[];
   counts: Counts;
 }
 
@@ -86,18 +75,26 @@ const numberFrom = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const toBrainRow = (row: Row): BrainRow => ({
+const noteRow = (row: Row) => ({
   id: Number(row.id),
-  text: String(row.text ?? ""),
-  ...(row.tier === undefined ? {} : { tier: String(row.tier) }),
-  ...(row.tags === undefined ? {} : { tags: String(row.tags) }),
-  ...(row.scope === undefined ? {} : { scope: String(row.scope) }),
-  ...(row.priority === undefined ? {} : { priority: Number(row.priority) }),
-  storedAt: String(row.storedAt ?? ""),
-  source: String(row.source ?? ""),
-  owner: String(row.owner ?? ""),
-  ...(row.active === undefined ? {} : { active: Number(row.active) === 1 }),
-  ...(row.supersededKey === undefined ? {} : { supersededKey: row.supersededKey === null ? null : String(row.supersededKey) }),
+  text: String(row.text),
+  tier: String(row.tier),
+  tags: String(row.tags),
+  storedAt: String(row.storedAt),
+  source: String(row.source),
+  owner: String(row.owner),
+});
+
+const ruleRow = (row: Row) => ({
+  id: Number(row.id),
+  text: String(row.text),
+  scope: String(row.scope),
+  priority: Number(row.priority),
+  storedAt: String(row.storedAt),
+  source: String(row.source),
+  owner: String(row.owner),
+  active: Number(row.active) === 1,
+  supersededKey: row.supersededKey === null ? null : String(row.supersededKey),
 });
 
 export class Brain extends DurableObject<Env> {
@@ -173,8 +170,8 @@ export class Brain extends DurableObject<Env> {
     return {
       standing: this.instructions.block(this.env.TIMEZONE ?? "UTC"),
       owner: principal.owner,
-      notes: notes.map(toBrainRow),
-      instructions: instructions.map(toBrainRow),
+      notes: notes.map(noteRow),
+      instructions: instructions.map(ruleRow),
       counts: { notes: notes.length, core, activeInstructions: active, allInstructions: instructions.length },
     };
   }

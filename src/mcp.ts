@@ -35,8 +35,8 @@ const exportShape = z.object({
     z.object({
       id: z.number(),
       text: z.string(),
-      tier: z.string().optional(),
-      tags: z.string().optional(),
+      tags: z.string(),
+      tier: z.string(),
       storedAt: z.string(),
       source: z.string(),
       owner: z.string(),
@@ -46,13 +46,13 @@ const exportShape = z.object({
     z.object({
       id: z.number(),
       text: z.string(),
-      scope: z.string().optional(),
-      priority: z.number().optional(),
+      scope: z.string(),
+      priority: z.number(),
       storedAt: z.string(),
       source: z.string(),
       owner: z.string(),
-      active: z.boolean().optional(),
-      supersededKey: z.string().nullable().optional(),
+      active: z.boolean(),
+      supersededKey: z.string().nullable(),
     }),
   ),
   counts: z.object({
