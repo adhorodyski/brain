@@ -1,16 +1,15 @@
 # v0 — the memory brain
 
-The build target. Nothing here exists yet; build it exactly as written.
+The spec v0 was built to, and the record of why each choice was made. `README.md` is how to connect; `AGENTS.md`
+is how to edit. Where they disagree, this file wins on design and `AGENTS.md` on house rules.
 
 A durable archive of one person's facts and standing instructions, on Cloudflare, reached over MCP by
 whatever agent they happen to be using. **The brain runs no inference on the request path.** Hosts do the
 thinking; this answers in milliseconds and persists.
 
-Prior design work lives in `~/Developer/pi-assistant-plan/` and is background only.
-`AGENTS.md` at the repo root predates this spec. Its **no-code-comments rule applies**; its failing-test-first
-rule deliberately does not, because v0 ships no automated tests (see *Verification*). Its file map, tool list
-and constraints describe a different system and are superseded by this document; update it when v0 lands
-rather than following it.
+v0 ships no automated tests. Every behaviour below is checked by hand against `wrangler dev` with `curl` or a
+real `pi` client, which answers each one in seconds. Prior design work lives in `~/Developer/pi-assistant-plan/`
+and is background only.
 
 ## Non-goals
 
@@ -47,7 +46,8 @@ deleted before v0 ships. No code, config var, or dependency from it carries over
 **`agents` is not a dependency.** `@modelcontextprotocol/server` exports its own `createMcpHandler`, and the
 `agents/mcp/server` entry is a 187-byte re-export of a wrapper around it. Going direct measured **1215 KiB /
 209 KiB gzipped** against **1229 KiB / 212 KiB** through `agents`, and drops the `node:async_hooks` import the
-wrapper pulls in. `agents` also drags `esbuild`, `@babel`, `capnweb`, `postal-mime`, `yaml` and `partysocket`
+wrapper pulls in. Those two figures were the empty door; the shipped worker carries the store and measures
+**1245.87 KiB / 217.73 KiB gzipped**. `agents` also drags `esbuild`, `@babel`, `capnweb`, `postal-mime`, `yaml` and `partysocket`
 as install weight for a worker that uses none of them. Take the MCP package directly.
 
 Take from `agents` only the shape of its wrapper, which is small: `allowedHostnames` handling is
@@ -563,6 +563,8 @@ enforceable from the server.
 
 ## Build order
 
+Shipped in this order, kept as the record of the sequence that worked.
+
 1. Scaffold: Worker + DO, schema at final shape, `McpServer` in `mcp.ts`, `BRAIN_TOKENS` guard, `/health`. Two
    deps, no `nodejs_compat`. Then connect a real `pi` client before writing any SQL — everything downstream
    assumes the endpoint works.
@@ -577,4 +579,4 @@ two-tokens case.
 9. `brain_export`.
 10. Behavioural probe; tune `brain_learn`'s description against it.
 
-Ship it and connect `pi`. Everything else in *Non-goals* stays out until memory actually works.
+Everything else in *Non-goals* stays out until memory is in daily use.

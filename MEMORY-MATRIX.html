@@ -320,10 +320,10 @@
         <td class="why">We pay for storage and compute we barely use. Nothing of mine runs, and nothing of mine thinks.</td></tr>
 
       <tr class="own"><th>Bundle / surface</th>
-        <td><div class="c"><i class="y"></i><span>2 deps, 1215 KiB / 209 KiB gz (measured)</span></div></td>
+        <td><div class="c"><i class="y"></i><span>2 deps, 1246 KiB / 218 KiB gz (shipped)</span></div></td>
         <td><div class="c"><i class="p"></i><span>full local agent</span></div></td>
         <td><div class="c"><i class="z"></i><span>Nx monorepo, Remix UI, billing</span></div></td>
-        <td class="why">Zero inference took <b>4769→2790 KiB</b>; dropping <code>agents</code> and going straight to the MCP SDK lands <b>1215 KiB</b> with no <code>nodejs_compat</code>. The 128 MB ceiling is per isolate; thin module scope is the lever.</td></tr>
+        <td class="why">Zero inference took <b>4769→2790 KiB</b>; dropping <code>agents</code> and going straight to the MCP SDK lands <b>1246 KiB shipped</b> (1215 with an empty door) with no <code>nodejs_compat</code>. The 128 MB ceiling is per isolate; thin module scope is the lever.</td></tr>
 
       <tr class="own"><th>Am I rebuilding Kody?</th>
         <td><div class="c"><i class="p"></i><span>shape yes, scope no</span></div></td>
