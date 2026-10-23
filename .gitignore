@@ -1,9 +1,7 @@
 node_modules
-.wrangler
+.wrangler/
 .dev.vars
 *.log
 .DS_Store
 .draft/
-.wrangler/
-.dev.vars
 *.tsbuildinfo
