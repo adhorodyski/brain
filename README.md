@@ -16,24 +16,33 @@ No model runs here. Your agent does the thinking, Brain stores and searches it, 
 
 ## What it does for you
 
-| You get | How |
-|---|---|
-| One memory for every agent | Nothing is held per host or per model. The token names you, and every host reads the same rows. |
-| Your house rules, said once | The instruction block rides on every result, so a compacted session or a fresh chat does not lose it. |
-| Nothing stored behind your back | A row exists because an agent called a write tool. No transcript mining, no automatic extraction. |
-| Deletion that cannot miss | `patch`, `forget` and `unlearn` need the row id and a word from that row's own text. They refuse when the two disagree. |
-| Nothing truncated or overwritten | An over-budget write throws and stores nothing. A new rule retires the older one on the same topic. |
-| Proof of what it knows | `brain_export` returns every row as JSON, retired rows included. |
-| No bill, no key | Free tier, two dependencies, no API key on the worker. |
+- Say it once, and every agent knows it in every new chat.
+- Nothing is stored, changed, or deleted without you asking.
+- Your Cloudflare account, on free tier. No API key, no bill.
 
 ## The two kinds of memory
 
-Can the sentence be false? It is a fact, and it goes to `brain_remember`. Can it only be obeyed? It is an
-instruction, and it goes to `brain_learn`. "Use British English" cannot be false, and "the garage code is
-4417" cannot be obeyed. The distinction decides storage: facts are uncapped and searchable, instructions are
-capped and replayed on every answer.
+Tell Brain something and it lands as either a note or an instruction.
 
-Every result ends with the block, and the counts are the real table totals:
+```
+                           can it be false?
+                  /                               \
+                 yes                              no
+                  |                               |
+      "the garage code is 4417"         "use British English"
+                  |                               |
+            brain_remember                   brain_learn
+                  |                               |
+         uncapped, searchable             capped as one set
+        found by brain_recall          replayed in every reply
+                  |                               |
+                a note                  a standing instruction
+```
+
+Notes are cheap, so they are uncapped and you have to go looking for them. Instructions cost tokens on every
+request, so the set is capped, and a new rule on the same topic retires the older one.
+
+Every answer ends with the instructions block, and the numbers in its header are live counts from the table:
 
 ```
 ## Standing instructions — 3 of 3 · 193/1050 (18%) · UTC
@@ -47,10 +56,8 @@ which — do not silently drop it. If I correct you on something not listed here
 brain_learn before answering.
 ```
 
-The counts are the live table totals. The last line is what makes corrections persist: a host that gets told
-off for something not yet stored is told to store it.
-
-What that buys, one message at a time:
+The last line is why corrections persist. A host that gets corrected on something not yet stored is told to
+store it before it answers. A week of it looks like this:
 
 ```
 you (in pi):    garage code?
@@ -80,7 +87,7 @@ environment of each host and out of your repo. An unknown or missing token gets 
 `WWW-Authenticate` challenge before any tool runs, and an unset secret refuses everything.
 
 Codex, Cursor and Claude Code take the same bearer header. No OAuth: every host you use accepts a static
-token. One token is a deliberate limit, see *Single user* below.
+token.
 
 ## Tools
 
@@ -111,13 +118,6 @@ overage. Nothing truncates, and nothing gets retired to make room.
 only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
 `Invalid Host`. Set it before the first deploy, not after.
 
-## Single user
-
-One token means one brain with one writer. There is no per-row ownership and no second account, so a token
-holder can change or delete anything. Adding a second person later needs identity on writes, a guard on
-`patch`, `forget` and `unlearn`, and a decision about what each person may see. None of that is built here, and
-nothing in the current shape blocks it.
-
 ## Run it
 
 Put your token in `.dev.vars` as `BRAIN_TOKEN=<token>`, then:
@@ -135,5 +135,3 @@ npm run check
 npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
-
-`AGENTS.md` holds the file map and the rules for editing this repo.
