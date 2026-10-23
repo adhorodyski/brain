@@ -1,52 +1,56 @@
 # AGENTS.md
 
-[README.md](README.md) is the product and the map. It outranks this file on what Brain is for.
+[README.md](README.md) is the product. It is also the scope: Brain does what its feature table claims and
+nothing else.
+
+## Where things live
+
+| File | Contents |
+|---|---|
+| `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, token-to-owner guard |
+| `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the instruction block built after each write |
+| `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that attaches the block to every result. The only place a tool is defined |
+| `src/store.ts` | All note SQL: budgets, `dkey` dedupe, owner refusal, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
+| `src/instruct.ts` | Instruction rows: the 200-character gate, supersede, tombstones, block renderer |
+| `src/env.d.ts` | `Env` |
 
 ## Rules
 
 **No comments. None.** Not line, block, JSDoc or TODO, and none inside a shell block. Rename or extract until
 none are needed. Prose belongs in the README.
 
-**Build only what the README's feature table claims.** Nothing else earns a place: no tests or test runner, no
-reminders, alarms or queues, no web fetch, no model call, no transcript, no tenancy or per-user isolation
-beyond the `owner` column, no vector search, no UI. `curl` and a real `pi` client against `wrangler dev` answer
-every behaviour in seconds, which is why there is no test runner.
+**Nothing beyond the README's feature table earns a place.** No test runner, no reminders, alarms or queues,
+no web fetch, no model call, no transcript, no isolation past the `owner` column, no vector search, no UI.
 
-**Two runtime deps**, `@modelcontextprotocol/server` and `zod`, and no `nodejs_compat`. Take
-`createMcpHandler`, `requireBearerAuth` and `hostHeaderValidationResponse` from the server package. Nothing
-from pi.
+**Two runtime deps**, `@modelcontextprotocol/server` and `zod`, and no `nodejs_compat`. Nothing from pi.
 
-**Greenfield, always.** `SCHEMA` in `brain.ts` creates the final shape: no `migrate()`, `ALTER`, column guard,
-flag, legacy name or default owner. If a change needs one, stop and ask.
+**Greenfield.** `SCHEMA` in `brain.ts` creates the final shape. No `migrate()`, `ALTER`, column guard, flag,
+legacy name or default owner. If a change seems to need one, stop and ask.
 
-## Facts you cannot infer from the code
+## Traps
 
-- `DurableObject` is not a global. Import it from `cloudflare:workers`, or the worker dies at load.
-- The verifier throws `OAuthError("invalid_token", …)`, not `Error`, and stamps `expiresAt`. Both are what
-  `requireBearerAuth` needs to answer 401 with a challenge instead of 500.
-- `dkey` is a hash of the normalised write args plus `owner`, never the JSON-RPC id. Hosts number requests from
-  1, so id-keyed dedupe calls one person's note a duplicate of another's. `brain_unlearn` clears the retired
-  rule's `dkey`, otherwise re-learning those words reports `again, same call` against an inactive row.
-- DDL is an array of statements, each `exec()`'d once, never split on `;`. The FTS triggers hold semicolons, so
-  splitting them quietly creates nothing and `recall` returns nothing forever. Those three triggers are the
-  whole index sync. Check a schema change with `count(*)` parity between `notes` and `notes_ft`.
-- Writes go through `ctx.storage.transactionSync`. A `BEGIN` through `sql.exec` is refused.
-- `export` mirrors its JSON into `content` as well as `structuredContent`. Pi shows the structured half only
-  when `content` is empty.
-- The instruction block is built **after** the write, so `learn` reports the state it caused, and it rides on
-  refusals too.
-- `brain_learn`'s description is the only nudge a host gets to store a correction. It carries the trigger
-  phrases and "call it before answering", so review it in diffs.
+These four are correct in the code today. Each has a plausible-looking edit that breaks it quietly.
+
+- Splitting the DDL string on `;` destroys the FTS triggers, which contain semicolons. Statements go through
+  `exec()` one at a time. The failure is silent: the worker boots and `recall` returns nothing forever.
+- Throwing a plain `Error` from the token verifier answers 500 instead of 401. It needs `OAuthError`, plus the
+  `expiresAt` stamp, and hosts then retry instead of treating the endpoint as down.
+- `dkey` hashes the normalised write args plus `owner`. Hashing the JSON-RPC id instead makes one person's note
+  look like a duplicate of another's, because hosts number requests from 1.
+- The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
+  from before its own row existed.
 
 ## Checks
 
 ```sh
 npm run check
-npx wrangler deploy --dry-run    # 217 KiB gzipped
+npx wrangler deploy --dry-run
 ```
 
-Then, against `wrangler dev`: a missing and an unknown token both give 401 with `WWW-Authenticate`; a query of
-`4417` ranks the garage note first; `"`, `((x`, a lone backslash and a blank query never raise
-`fts5: syntax error`; a near-miss tag echoes the stored one; the same write twice returns `again, same call`
-with one row; another owner's row refuses `forget` by name; a retired rule stops matching searches but stays
-in `export`; an over-budget write throws and stores nothing.
+The dry-run bundles at 217 KiB gzipped. Tens more means a dependency crept in.
+
+Then against `wrangler dev`, with a real `pi` client for the tools and `curl` for the rest: a missing or
+unknown token gives 401 with `WWW-Authenticate`; a query of `4417` ranks the garage note first; `"`, `((x`, a
+lone backslash and a blank query never raise `fts5: syntax error`; a near-miss tag echoes the stored one; the
+same write twice returns `again, same call` with one row; another owner's row refuses `forget` by name; a
+retired rule stops matching searches but stays in `export`; an over-budget write throws and stores nothing.

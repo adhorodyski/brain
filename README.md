@@ -16,16 +16,16 @@ No model runs here. Your agent does the thinking, Brain stores and searches it, 
 
 ## What it does for you
 
-| You get | How | Code |
-|---|---|---|
-| One memory shared by every agent and model | The token names you, and every host reads and writes one transcript-free store | `src/index.ts` (guard), `src/mcp.ts` (tools) |
-| Your house rules followed without repeating them | The budgeted instruction block rides on every result, so session compaction cannot lose it | `src/brain.ts` (block state), `src/mcp.ts` (attaches it) |
-| Nothing remembered behind your back | A row only exists because an agent called a write tool. No transcript mining, no automatic extraction | `src/store.ts` |
-| Deletion you can trust | `patch`, `forget` and `unlearn` need the row id **and** a word from that row's own text, and refuse when the two disagree | `src/store.ts` |
-| Nothing quietly cut off or overwritten | A write past a budget throws and stores nothing. A new rule retires the older rule on the same topic, and the retiree stops matching searches | `src/store.ts`, `src/instruct.ts` |
-| Proof of what it knows | `brain_export` returns every row as JSON, retired rows included | `src/brain.ts`, `src/mcp.ts` |
-| Two people, one brain, no surprises | Every row carries its owner, and only that owner can change or delete it | `src/store.ts` |
-| No bill and no key | Free tier, two dependencies, no API key on the worker, nothing to pay for per call | `package.json` |
+| You get | How |
+|---|---|
+| One memory for every agent | Nothing is held per host or per model. The token names you, and every host reads the same rows. |
+| Your house rules, said once | The instruction block rides on every result, so a compacted session or a fresh chat does not lose it. |
+| Nothing stored behind your back | A row exists because an agent called a write tool. No transcript mining, no automatic extraction. |
+| Deletion that cannot miss | `patch`, `forget` and `unlearn` need the row id and a word from that row's own text. They refuse when the two disagree. |
+| Nothing truncated or overwritten | An over-budget write throws and stores nothing. A new rule retires the older one on the same topic. |
+| Proof of what it knows | `brain_export` returns every row as JSON, retired rows included. |
+| Two people, one brain | Every row carries its owner, and only that owner can change or delete it. |
+| No bill, no key | Free tier, two dependencies, no API key on the worker. |
 
 ## The two kinds of memory
 
@@ -108,22 +108,13 @@ overage. Nothing truncates, and nothing gets retired to make room.
 `TIMEZONE` (UTC) prints in the block header so "next Tuesday" means the same thing to every host.
 `BRAIN_HOSTNAME` is only needed for a custom hostname; `localhost` and `workers.dev` pass without it.
 
-## Where things live
-
-| File | Contents |
-|---|---|
-| `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, token-to-owner guard |
-| `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the instruction block built after each write |
-| `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that attaches the block to every result. The only place a tool is described |
-| `src/store.ts` | All note SQL: budgets, `dkey` dedupe, owner refusal, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
-| `src/instruct.ts` | Instruction rows: the 200-character gate, supersede, tombstones, block renderer |
-| `src/env.d.ts` | `Env` |
-
 ## Run it
+
+Put `token=owner` pairs in `.dev.vars`, then:
 
 ```sh
 npm install
-cp .dev.vars.example .dev.vars    # put token=owner pairs here
+cp .dev.vars.example .dev.vars
 npm run dev
 ```
 
@@ -131,6 +122,8 @@ Local rows live in `.wrangler/state`, so a deploy starts empty.
 
 ```sh
 npm run check
-npx wrangler deploy --dry-run     # 217 KiB gzipped; tens more means a dependency crept in
+npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
+
+`AGENTS.md` holds the file map and the rules for editing this repo.
