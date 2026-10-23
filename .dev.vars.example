@@ -1,4 +1,3 @@
-BRAIN_TOKEN=replace-with-openssl-rand-hex-32
 BRAIN_HOSTNAME=brain.your-subdomain.workers.dev
 CORE_TOKENS=900
 MAX_NOTE=300

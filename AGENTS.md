@@ -7,7 +7,7 @@ nothing else.
 
 | File | Contents |
 |---|---|
-| `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, single-token guard |
+| `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, Cloudflare Access identity guard |
 | `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the instruction block built after each write |
 | `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that attaches the block to every result. The only place a tool is defined |
 | `src/store.ts` | All note SQL: budgets, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
@@ -29,12 +29,17 @@ legacy name or default value for a dropped column. If a change seems to need one
 
 ## Traps
 
-These four are correct in the code today. Each has a plausible-looking edit that breaks it quietly.
+These five are correct in the code today. Each has a plausible-looking edit that breaks it quietly.
 
 - Splitting the DDL string on `;` destroys the FTS triggers, which contain semicolons. Statements go through
   `exec()` one at a time. The failure is silent: the worker boots and `recall` returns nothing forever.
-- Throwing a plain `Error` from the token verifier answers 500 instead of 401. It needs `OAuthError`, plus the
-  `expiresAt` stamp, and hosts then retry instead of treating the endpoint as down.
+- The identity guard is `ctx.access?.getIdentity()`, and the `?.` is load-bearing. `ctx.access` is undefined
+  whenever Access did not authenticate the invocation — Access switched off, a hostname it does not cover, or
+  `wrangler dev` with no `access.dev` block. Drop the `?.` and those requests throw a TypeError and answer 500,
+  which hosts read as the endpoint being down; keep it and they answer 403 and go sign in.
+- `access.dev.aud` in `wrangler.jsonc` is what gives `wrangler dev` an identity, and wrangler refuses to start
+  with the block present and `aud` missing. Delete the whole block and local dev 403s like a Worker with no
+  Access rule, which reads as broken code rather than missing config.
 - `dkey` hashes the normalised write args, not the JSON-RPC id. Hosts number requests from 1 per session, so an
   id-keyed dedupe collides across clients and reports a fresh write as a duplicate.
 - The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
@@ -49,8 +54,10 @@ npx wrangler deploy --dry-run
 
 The dry-run bundles at 217 KiB gzipped. Tens more means a dependency crept in.
 
-Then against `wrangler dev`, with a real `pi` client for the tools and `curl` for the rest: a missing or
-unknown token gives 401 with `WWW-Authenticate`; a query of `4417` ranks the garage note first; `"`, `((x`, a
+Then against `wrangler dev`, with a real `pi` client for the tools and `curl` for the rest: with the
+`access.dev` block removed `/mcp` gives 403 `Access required` and not 500; against the deployed Worker, an
+unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from this Worker; a query of `4417`
+ranks the garage note first; `"`, `((x`, a
 lone backslash and a blank query never raise `fts5: syntax error`; a near-miss tag echoes the stored one; the
 same write twice returns `again, same call` with one row; a retired rule stops matching searches but stays in
 `export`; an over-budget write throws and stores nothing.
