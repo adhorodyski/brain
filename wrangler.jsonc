@@ -4,6 +4,12 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-19",
   "observability": { "enabled": true },
+  "access": {
+    "dev": {
+      "aud": "dev",
+      "identity": { "email": "you@example.com" }
+    }
+  },
   "durable_objects": {
     "bindings": [{ "name": "Brain", "class_name": "Brain" }]
   },

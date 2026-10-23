@@ -72,22 +72,13 @@ you (next week, different model): what's my garage code?
 
 ## Connect a host
 
-```sh
-pi mcp add brain --url https://<worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
-```
+Brain is a regular MCP server at `https://<worker>.workers.dev/mcp`. Point any host at that URL.
 
-One secret, one token, generated with `openssl rand -hex 32`:
-
-```sh
-npx wrangler secret put BRAIN_TOKEN
-```
-
-That token is the whole access control. Anyone holding it reads and writes the whole brain, so keep it in the
-environment of each host and out of your repo. An unknown or missing token gets 401 with a
-`WWW-Authenticate` challenge before any tool runs, and an unset secret refuses everything.
-
-Codex, Cursor and Claude Code take the same bearer header. No OAuth: every host you use accepts a static
-token.
+Cloudflare Access is the whole access control. Protect the Worker in **Workers & Pages → your Worker →
+Access**, pick who signs in, then turn on **Managed OAuth** in that app's advanced settings. The free plan
+covers 50 users. Access answers an unauthenticated request before any tool runs, so a host that speaks MCP
+authorization signs in in the browser and renews on its own afterwards. To cut someone off, drop them from the
+policy — no redeploy, nothing to rotate.
 
 ## Tools
 
@@ -120,7 +111,9 @@ only allows `localhost` without it, so a deploy that skips this answers every `t
 
 ## Run it
 
-Put your token in `.dev.vars` as `BRAIN_TOKEN=<token>`, then:
+`wrangler.jsonc` carries an `access.dev` block as the local stand-in for a signed-in identity: change the
+email to test as someone else, delete the block to test the refusal. Put `BRAIN_HOSTNAME` and the budgets in
+`.dev.vars`, then:
 
 ```sh
 npm install
