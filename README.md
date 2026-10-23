@@ -106,7 +106,9 @@ because a rule should state behaviour and not point somewhere else. An over-budg
 overage. Nothing truncates, and nothing gets retired to make room.
 
 `TIMEZONE` (UTC) prints in the block header so "next Tuesday" means the same thing to every host.
-`BRAIN_HOSTNAME` is only needed for a custom hostname; `localhost` and `workers.dev` pass without it.
+`BRAIN_HOSTNAME` must name the hostname you serve, and the `workers.dev` URL counts as one. The host check
+only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
+`Invalid Host`. Set it before the first deploy, not after.
 
 ## Run it
 
