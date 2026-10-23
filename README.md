@@ -1,161 +1,70 @@
 # durable-personal-agent
 
-A durable archive of one person's facts and standing instructions, on Cloudflare, reached over MCP by
-whatever agent they happen to be using. **The brain runs no inference on the request path.** Hosts do the
-thinking; this answers in milliseconds and persists.
+One person's facts and standing instructions, on Cloudflare over MCP. No model runs here: your agent thinks,
+this stores and searches.
 
+## Connect a host
+
+```sh
+pi mcp add brain --url https://<worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
 ```
-pi / Codex / Cursor / Claude Code  ──MCP──▶  one Worker ──▶  one Durable Object
-                                                            SQLite: notes + instructions
+
+`BRAIN_TOKEN` holds one token and the token names the owner. Tokens are the `BRAIN_TOKENS` secret: a
+comma-separated `token=owner` list, one `openssl rand -hex 32` per person.
+
+```sh
+npx wrangler secret put BRAIN_TOKENS
 ```
 
-Two tables, seven tools, one endpoint, two runtime dependencies. The design and every measured decision
-behind it are in [MEMORY-DESIGN.md](MEMORY-DESIGN.md), which is the source of truth for this repo.
+An unknown, missing or malformed token gets 401 with a `WWW-Authenticate` challenge before any tool runs, and an
+empty `BRAIN_TOKENS` refuses everything: there is no default owner. Codex, Cursor and Claude Code take it too.
 
-## What it holds
+## Tools
 
-| | |
-|---|---|
-| `notes` | Facts. Anything that can be true or false: codes, addresses, decisions, dates, who people are. Uncapped, FTS5-searched, two tiers — `note` is free and reachable only by search, `core` is a small budgeted set that prints its fill on every write. |
-| `instructions` | Rules. Anything that can only be obeyed: British English, edit in place, no "great question". Budgeted, retired by newer rules on the same topic, and rendered into **every** tool response. |
+Every result, refusals included, ends with the owner's standing-instruction block.
 
-The test a host applies, and the one to apply when reading a stored row: can the sentence be **false**? Then
-it is a note. Can it only be **obeyed**? Then it is an instruction.
+| Tool | Args | Returns |
+|---|---|---|
+| `brain_recall` | `query`, `limit?` | Ranked `#id · [tier] · stored <date> · text #tags` lines, plus a `## Related` block of tag neighbours |
+| `brain_remember` | `items[] { text, tags?, tier? }` | `stored #7 · core 612/3150 (19%)`, or `stored · again, same call` for a repeat |
+| `brain_patch` | `id`, `confirm`, `text` | `patched #7` |
+| `brain_forget` | `id`, `confirm` | `forgot #7` |
+| `brain_learn` | `text`, `scope?` as `always`, `briefing`, `coding`, `writing` | `stored · 5 of 13 · 299/1050 (28%)` |
+| `brain_unlearn` | `id`, `confirm` | `retired · 3 of 12 · 193/1050 (18%)` |
+| `brain_export` | — | Every note and instruction, retired rows included, as JSON |
 
-| Tool | |
-|---|---|
-| `brain_recall` | Ranked lines from FTS5, plus a `## Related` block of tag neighbours when the query points at one subject. |
-| `brain_remember` | Stores facts in batches. Refuses an over-long note or a `core` write that would overflow the budget, naming the overage. |
-| `brain_patch` | Rewrites one note. Needs the id **and** words from that note's own text, because rowids get reused. |
-| `brain_forget` | Deletes one note behind the same agreement. `destructiveHint`. |
-| `brain_learn` | Stores one rule. Refuses anything over 200 characters, and any rule carrying a link, an email or a code fence. |
-| `brain_unlearn` | Retires one rule. Retired rules leave `recall` and stay in `export`. |
-| `brain_export` | The whole brain as JSON, retired rows included, in `content` and in `structuredContent`. |
+A fact (it can be false) goes to `remember`; a rule (it can only be obeyed) goes to `learn`. `tier` is `note`
+(free, searchable) or `core` (a small budgeted set). `patch`, `forget` and `unlearn` need the id **and** a
+fragment of that row's own text: a delete frees its rowid, so an id alone names nothing.
 
-Every response ends with the standing-instruction block, so a host is told the owner's rules on every call and
-compaction cannot lose them. Writes carry a dedupe key hashed from the arguments plus the owner, so a transport
-retry stores one row and reports `again, same call` rather than paying twice. Owner and source come from the
-token and are never tool arguments, so a page cannot name a thing that isn't accepted as input.
+## Budgets and refusals
 
-## Setup
+`CORE_TOKENS` (900) caps `core` notes and `INSTRUCT_TOKENS` (300) caps active instructions, and neither touches
+the other. Budgets are counted in tokens but printed in characters at `tokens × 3.5`, and the fill a write
+reports is `used/cap (percent)` — `core 612/3150 (19%)`. An over-budget write stores nothing and throws, naming
+the overage: *"this note needs 214, which is 61 over"*. Nothing is truncated and nothing is retired to make
+room. `MAX_NOTE` (300) caps one note. `learn` caps a rule at 200 characters and separately refuses any rule
+carrying a link, an email address or a code fence.
 
-Node 22+ and a Cloudflare account on the free tier. No model, no provider account, no API key — the brain
-calls nothing.
+## Owner
 
-### 1. Install
+`owner` comes from the token, never from a tool argument, so a page an agent reads cannot forge it. One brain
+holds every owner's rows; `patch`, `forget` and `unlearn` refuse a row owned by someone else and name that
+owner. `TIMEZONE` (UTC) is printed in the block header so "next Tuesday" is unambiguous, and `BRAIN_HOSTNAME`
+is set only for a custom hostname — `localhost` and `workers.dev` pass without it.
+
+## Running it, and the checks
 
 ```sh
 npm install
+cp .dev.vars.example .dev.vars
+npm run dev
+curl -s localhost:8787/health
 npm run check
 npx wrangler deploy --dry-run
-```
-
-The bundle is about 1247 KiB raw / 218 KiB gzipped. A jump of tens of KiB means something pulled in a
-dependency it should not have.
-
-### 2. Make a token per person
-
-```sh
-openssl rand -hex 32
-```
-
-One token per person is what makes provenance mean anything and is what lets two people share one brain: a
-shared token makes every note read as written by both, and leaves the ownership guard with nothing to compare.
-
-### 3. Run it locally
-
-```sh
-cp .dev.vars.example .dev.vars     # put your generated tokens in as token=owner pairs
-npm run dev
-```
-
-In another terminal:
-
-```sh
-curl -s -o /dev/null -w '%{http_code}\n' localhost:8787/health
-
-curl -s localhost:8787/mcp -X POST \
-  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
-  -H 'authorization: Bearer <your token>' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-```
-
-Expect `200`, then all seven `brain_` tools. Removing the header must answer 401 **with** a
-`WWW-Authenticate` challenge — a host that gets a 500 reads the brain as an outage rather than asking for a
-token.
-
-Local notes live in `.wrangler/state`, so a deploy still starts empty.
-
-### 4. Deploy
-
-```sh
-npx wrangler login
-npx wrangler secret put BRAIN_TOKENS
 npx wrangler deploy
 ```
 
-`BRAIN_TOKENS` is the comma-separated `token=owner` list from `.dev.vars.example`. An unknown or missing token
-gets 401 before any tool runs, and there is no default owner.
-
-The first deploy needs `"migrations": [{ "tag": "v1", "new_sqlite_classes": ["Brain"] }]`, which is already in
-`wrangler.jsonc`. Without it the worker deploys cleanly and then fails at runtime with "no such Durable Object
-class". Tags are append-only: add a new one, never edit an old one.
-
-### 5. Add it to a host
-
-```sh
-pi mcp add brain --url https://<your-worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
-```
-
-Pi reads the server's `instructions` string into connection state, so the trigger line really is delivered. It
-skips OAuth entirely because an `Authorization` header is present, and it accepts a `405` on the server-to-client
-stream and carries on. Codex, Cursor, Claude Code and claude.ai all take a static bearer over streamable HTTP, so
-the same endpoint serves them unchanged.
-
-### Optional vars
-
-| Var | Default | |
-|---|---|---|
-| `CORE_TOKENS` | `900` | Budget for `core` notes, printed as a char count and a percentage on every write. |
-| `MAX_NOTE` | `300` | Longest allowed note, in characters. |
-| `INSTRUCT_TOKENS` | `300` | Budget for active instructions. Separate from `CORE_TOKENS`, so a chatty week of facts cannot evict the tone rules. |
-| `TIMEZONE` | `UTC` | Rendered into the standing-instruction header so relative dates are unambiguous. |
-| `BRAIN_HOSTNAME` | unset | Set once you serve a custom hostname. `localhost` and `workers.dev` are accepted without it. |
-
-## Verification
-
-v0 ships no automated tests on purpose: the whole surface is one MCP endpoint over DO SQLite, and every
-behaviour is answerable in seconds with `curl` or a `pi` client. The [spec's Verification
-table](MEMORY-DESIGN.md) is the checklist, and it is what was run by hand before shipping. The rows worth
-re-running after any change:
-
-| Check | Expect |
-|---|---|
-| `POST /mcp` with no header | 401 with `WWW-Authenticate`, before any tool runs |
-| `tools/list` with a valid token | all seven `brain_` tools |
-| The same `remember` twice | one row, the second call reports `again, same call` |
-| Two tokens sending different text | both rows stored, in **one** brain |
-| `recall` for a stray quote, bare punctuation, an empty query | `nothing stored matching …`, never an `fts5: syntax error` |
-| `patch`, then `recall` for the old wording | no match, and `count(*)` still equal between `notes` and `notes_ft` |
-| `patch` where `confirm` is absent from that row | nothing changes, the refusal says why |
-| `forget` on a row whose owner differs | nothing changes, the refusal names the owner |
-| `learn` superseding a rule | the loser is `active = 0`, gone from `recall`, present in `export` |
-
-Then the behavioural probe, which is the only check that catches a preference silently not sticking: six
-utterances through a cheap host model — *"always use British English"*, *"you were too verbose, stop that"*,
-*"I prefer bullets over prose"*, *"next time edit rather than rewrite"*, *"my garage code is 4417"* which must
-hit `brain_remember`, and *"what's my garage code"* which must write nothing.
-
-## Notes for whoever edits this next
-
-Read [MEMORY-DESIGN.md](MEMORY-DESIGN.md) first. It records the four runtime gotchas that cost hours and throw
-nothing at build time — `DurableObject` is not a global, a verifier must throw `OAuthError` rather than `Error`,
-`requireBearerAuth` refuses a token with no `expiresAt`, and `ctx.mcpReq.id` restarts at 1 per client session so
-it can never be a dedupe key. It also records why the schema is held as an array of statements: the sync triggers
-contain semicolons, so splitting the DDL on `;` silently destroys them and `recall` returns nothing forever.
-
-Storage is Durable Object SQLite rather than D1 because DO SQLite has no daily rows-read cap and an FTS5 search
-reads rows. Its single-threaded execution is what makes the budget check and the supersede step un-raceable.
-
-Everything in the spec's Non-goals stays out: no reminders, no curation pass, no web fetch, no `ask`, no
-Telegram, no vectors, no OAuth, no UI.
+Put the `token=owner` pairs in `.dev.vars`. Local rows live in `.wrangler/state`, so a deploy starts empty. A
+bundle tens of KiB past ~218 KiB gzipped means a dependency crept in. Everything else is verified by hand
+against `wrangler dev`, from the table in [MEMORY-DESIGN.md](MEMORY-DESIGN.md).

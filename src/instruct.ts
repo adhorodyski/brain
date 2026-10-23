@@ -145,7 +145,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
           `instruction #${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
       }
-      host.sql("UPDATE instructions SET active = 0 WHERE rowid = ?", [ruleId]);
+      host.sql("UPDATE instructions SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
       return `retired · ${fill()}`;
     });
   }
