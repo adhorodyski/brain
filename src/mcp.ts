@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ExportReply, Reply } from "./brain";
-import type { NoteInput, Principal } from "./store";
+import type { NoteInput } from "./store";
 
 const INSTRUCTIONS = `The owner's memory and preferences. Consult it before answering anything about them, and store anything durable before you answer.
 
@@ -30,7 +30,6 @@ const noteItem = z.object({
 });
 
 const exportShape = z.object({
-  owner: z.string(),
   notes: z.array(
     z.object({
       id: z.number(),
@@ -38,8 +37,6 @@ const exportShape = z.object({
       tags: z.string(),
       tier: z.string(),
       storedAt: z.string(),
-      source: z.string(),
-      owner: z.string(),
     }),
   ),
   instructions: z.array(
@@ -49,8 +46,6 @@ const exportShape = z.object({
       scope: z.string(),
       priority: z.number(),
       storedAt: z.string(),
-      source: z.string(),
-      owner: z.string(),
       active: z.boolean(),
       supersededKey: z.string().nullable(),
     }),
@@ -70,7 +65,7 @@ const spoken = (reply: Reply) => ({
   ...(reply.failed ? { isError: true } : {}),
 });
 
-export function brainServer(brain: BrainHandle, principal: Principal) {
+export function brainServer(brain: BrainHandle) {
   const server = new McpServer(
     { name: "brain", version: "0.1.0" },
     { instructions: INSTRUCTIONS },
@@ -92,7 +87,7 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async ({ query, limit }) =>
       call(
-        () => brain.recall(query, limit ?? 8, principal),
+        () => brain.recall(query, limit ?? 8),
         spoken,
       ),
   );
@@ -107,7 +102,7 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async ({ items }) =>
       call(
-        () => brain.remember(items, principal),
+        () => brain.remember(items),
         spoken,
       ),
   );
@@ -126,7 +121,7 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async ({ id, confirm, text: body }) =>
       call(
-        () => brain.patch(id, confirm, body, principal),
+        () => brain.patch(id, confirm, body),
         spoken,
       ),
   );
@@ -144,7 +139,7 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async ({ id, confirm }) =>
       call(
-        () => brain.forget(id, confirm, principal),
+        () => brain.forget(id, confirm),
         spoken,
       ),
   );
@@ -170,7 +165,7 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async ({ text: body, scope }) =>
       call(
-        () => brain.learn(body, scope ?? "always", principal),
+        () => brain.learn(body, scope ?? "always"),
         spoken,
       ),
   );
@@ -188,7 +183,7 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async ({ id, confirm }) =>
       call(
-        () => brain.unlearn(id, confirm, principal),
+        () => brain.unlearn(id, confirm),
         spoken,
       ),
   );
@@ -203,10 +198,9 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
     },
     async () =>
       call(
-        () => brain.export(principal),
+        () => brain.export(),
         (reply: ExportReply) => {
           const payload = {
-            owner: reply.owner,
             notes: reply.notes,
             instructions: reply.instructions,
             counts: reply.counts,
@@ -223,11 +217,11 @@ export function brainServer(brain: BrainHandle, principal: Principal) {
 }
 
 export interface BrainHandle {
-  recall(query: string, limit: number, principal: Principal): Promise<Reply>;
-  remember(items: NoteInput[], principal: Principal): Promise<Reply>;
-  patch(id: number, confirm: string, text: string, principal: Principal): Promise<Reply>;
-  forget(id: number, confirm: string, principal: Principal): Promise<Reply>;
-  learn(text: string, scope: string, principal: Principal): Promise<Reply>;
-  unlearn(id: number, confirm: string, principal: Principal): Promise<Reply>;
-  export(principal: Principal): Promise<ExportReply>;
+  recall(query: string, limit: number): Promise<Reply>;
+  remember(items: NoteInput[]): Promise<Reply>;
+  patch(id: number, confirm: string, text: string): Promise<Reply>;
+  forget(id: number, confirm: string): Promise<Reply>;
+  learn(text: string, scope: string): Promise<Reply>;
+  unlearn(id: number, confirm: string): Promise<Reply>;
+  export(): Promise<ExportReply>;
 }

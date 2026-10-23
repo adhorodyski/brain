@@ -24,7 +24,6 @@ No model runs here. Your agent does the thinking, Brain stores and searches it, 
 | Deletion that cannot miss | `patch`, `forget` and `unlearn` need the row id and a word from that row's own text. They refuse when the two disagree. |
 | Nothing truncated or overwritten | An over-budget write throws and stores nothing. A new rule retires the older one on the same topic. |
 | Proof of what it knows | `brain_export` returns every row as JSON, retired rows included. |
-| Two people, one brain | Every row carries its owner, and only that owner can change or delete it. |
 | No bill, no key | Free tier, two dependencies, no API key on the worker. |
 
 ## The two kinds of memory
@@ -54,13 +53,13 @@ off for something not yet stored is told to store it.
 What that buys, one message at a time:
 
 ```
-owner (in pi):    garage code?
+you (in pi):    garage code?
   → brain_recall  query:"garage code"     ← #1 · Garage door code is 4417 #home #code
 
-owner (in Codex): stop opening replies with "Sure!"
+you (in Codex): stop opening replies with "Sure!"
   → brain_learn   text:"Never open a reply with 'Sure!'"
 
-owner (next week, different model): what's my garage code?
+you (next week, different model): what's my garage code?
   → every answer now carries the block: no "Sure!" openings, British English, edit in place
 ```
 
@@ -70,16 +69,18 @@ owner (next week, different model): what's my garage code?
 pi mcp add brain --url https://<worker>.workers.dev/mcp --bearer-token-env-var BRAIN_TOKEN
 ```
 
-`BRAIN_TOKEN` holds one token, and the token names the owner. Tokens live in the `BRAIN_TOKENS` secret as a
-comma-separated `token=owner` list, one `openssl rand -hex 32` per person:
+One secret, one token, generated with `openssl rand -hex 32`:
 
 ```sh
-npx wrangler secret put BRAIN_TOKENS
+npx wrangler secret put BRAIN_TOKEN
 ```
 
-An unknown or missing token gets 401 with a `WWW-Authenticate` challenge before any tool runs, and empty
-`BRAIN_TOKENS` refuses everything. Codex, Cursor and Claude Code take the same bearer header. No OAuth: every
-host you use accepts a static token.
+That token is the whole access control. Anyone holding it reads and writes the whole brain, so keep it in the
+environment of each host and out of your repo. An unknown or missing token gets 401 with a
+`WWW-Authenticate` challenge before any tool runs, and an unset secret refuses everything.
+
+Codex, Cursor and Claude Code take the same bearer header. No OAuth: every host you use accepts a static
+token. One token is a deliberate limit, see *Single user* below.
 
 ## Tools
 
@@ -110,9 +111,16 @@ overage. Nothing truncates, and nothing gets retired to make room.
 only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
 `Invalid Host`. Set it before the first deploy, not after.
 
+## Single user
+
+One token means one brain with one writer. There is no per-row ownership and no second account, so a token
+holder can change or delete anything. Adding a second person later needs identity on writes, a guard on
+`patch`, `forget` and `unlearn`, and a decision about what each person may see. None of that is built here, and
+nothing in the current shape blocks it.
+
 ## Run it
 
-Put `token=owner` pairs in `.dev.vars`, then:
+Put your token in `.dev.vars` as `BRAIN_TOKEN=<token>`, then:
 
 ```sh
 npm install

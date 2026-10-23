@@ -4,7 +4,6 @@ import {
   createNoteStore,
   type Host,
   type NoteInput,
-  type Principal,
   type Row,
   type SqlValue,
 } from "./store";
@@ -27,7 +26,6 @@ type RuleRow = ReturnType<typeof ruleRow>;
 
 export interface ExportReply {
   standing: string;
-  owner: string;
   notes: NoteRow[];
   instructions: RuleRow[];
   counts: Counts;
@@ -40,8 +38,6 @@ const SCHEMA = [
     tags   TEXT NOT NULL DEFAULT '',
     tier   TEXT NOT NULL DEFAULT 'note',
     at     TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT '',
-    owner  TEXT NOT NULL DEFAULT '',
     dkey   TEXT UNIQUE
   )`,
   `CREATE VIRTUAL TABLE notes_ft USING fts5(text, tags, content='notes', content_rowid='rowid')`,
@@ -62,8 +58,6 @@ const SCHEMA = [
     when_scope     TEXT NOT NULL DEFAULT 'always',
     priority       INTEGER NOT NULL DEFAULT 0,
     at             TEXT NOT NULL,
-    source         TEXT NOT NULL DEFAULT '',
-    owner          TEXT NOT NULL DEFAULT '',
     active         INTEGER NOT NULL DEFAULT 1,
     superseded_key TEXT,
     dkey           TEXT UNIQUE
@@ -81,8 +75,6 @@ const noteRow = (row: Row) => ({
   tier: String(row.tier),
   tags: String(row.tags),
   storedAt: String(row.storedAt),
-  source: String(row.source),
-  owner: String(row.owner),
 });
 
 const ruleRow = (row: Row) => ({
@@ -91,8 +83,6 @@ const ruleRow = (row: Row) => ({
   scope: String(row.scope),
   priority: Number(row.priority),
   storedAt: String(row.storedAt),
-  source: String(row.source),
-  owner: String(row.owner),
   active: Number(row.active) === 1,
   supersededKey: row.supersededKey === null ? null : String(row.supersededKey),
 });
@@ -138,38 +128,37 @@ export class Brain extends DurableObject<Env> {
     }
   }
 
-  async recall(query: string, limit: number, principal: Principal): Promise<Reply> {
+  async recall(query: string, limit: number): Promise<Reply> {
     return this.answer(() => this.notes.recall(query, limit));
   }
 
-  async remember(items: NoteInput[], principal: Principal): Promise<Reply> {
-    return this.answer(() => this.notes.remember(items, principal));
+  async remember(items: NoteInput[]): Promise<Reply> {
+    return this.answer(() => this.notes.remember(items));
   }
 
-  async patch(id: number, confirm: string, text: string, principal: Principal): Promise<Reply> {
-    return this.answer(() => this.notes.patch(id, confirm, text, principal));
+  async patch(id: number, confirm: string, text: string): Promise<Reply> {
+    return this.answer(() => this.notes.patch(id, confirm, text));
   }
 
-  async forget(id: number, confirm: string, principal: Principal): Promise<Reply> {
-    return this.answer(() => this.notes.forget(id, confirm, principal));
+  async forget(id: number, confirm: string): Promise<Reply> {
+    return this.answer(() => this.notes.forget(id, confirm));
   }
 
-  async learn(text: string, scope: string, principal: Principal): Promise<Reply> {
-    return this.answer(() => this.instructions.learn(text, scope, principal));
+  async learn(text: string, scope: string): Promise<Reply> {
+    return this.answer(() => this.instructions.learn(text, scope));
   }
 
-  async unlearn(id: number, confirm: string, principal: Principal): Promise<Reply> {
-    return this.answer(() => this.instructions.unlearn(id, confirm, principal));
+  async unlearn(id: number, confirm: string): Promise<Reply> {
+    return this.answer(() => this.instructions.unlearn(id, confirm));
   }
 
-  async export(principal: Principal): Promise<ExportReply> {
+  async export(): Promise<ExportReply> {
     const notes = this.notes.notes();
     const instructions = this.instructions.instructions();
     const core = notes.filter((row) => String(row.tier) === "core").length;
     const active = instructions.filter((row) => Number(row.active) === 1).length;
     return {
       standing: this.instructions.block(this.env.TIMEZONE ?? "UTC"),
-      owner: principal.owner,
       notes: notes.map(noteRow),
       instructions: instructions.map(ruleRow),
       counts: { notes: notes.length, core, activeInstructions: active, allInstructions: instructions.length },

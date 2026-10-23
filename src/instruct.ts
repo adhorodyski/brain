@@ -2,9 +2,7 @@ import {
   budgetChars,
   flat,
   percent,
-  refuseOwner,
   type Host,
-  type Principal,
   type Row,
 } from "./store";
 
@@ -76,7 +74,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
     return [head, ...bodies, "", RULES_ABOVE].join("\n");
   }
 
-  async function learn(text: string, scope: string, principal: Principal): Promise<string> {
+  async function learn(text: string, scope: string): Promise<string> {
     const body = flat(text);
     if (body.length === 0) throw new Error("empty text teaches nothing");
     if (body.length > MAX_RULE) {
@@ -91,7 +89,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
       );
     }
 
-    const key = await host.digest([principal.owner, scope, body]);
+    const key = await host.digest([scope, body]);
     return host.transaction(() => {
       if (host.sql("SELECT rowid AS id FROM instructions WHERE dkey = ?", [key])[0]) {
         return `stored · again, same call · ${fill()}`;
@@ -119,26 +117,25 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
         ]);
       }
       host.sql(
-        `INSERT INTO instructions (key, text, when_scope, priority, at, source, owner, active, superseded_key, dkey)
-          VALUES (?, ?, ?, 0, ?, ?, ?, 1, NULL, ?)`,
-        [keyOfMine, body, scope, new Date().toISOString(), principal.source, principal.owner, key],
+        `INSERT INTO instructions (key, text, when_scope, priority, at, active, superseded_key, dkey)
+          VALUES (?, ?, ?, 0, ?, 1, NULL, ?)`,
+        [keyOfMine, body, scope, new Date().toISOString(), key],
       );
       return `stored · ${fill()}`;
     });
   }
 
-  async function unlearn(ruleId: number, confirm: string, principal: Principal): Promise<string> {
+  async function unlearn(ruleId: number, confirm: string): Promise<string> {
     const wanted = flat(confirm);
     return host.transaction(() => {
       const row = host.sql(
-        `SELECT rowid AS id, text AS text, owner AS owner, active AS active
+        `SELECT rowid AS id, text AS text, active AS active
           FROM instructions WHERE rowid = ?`,
         [ruleId],
       )[0];
       if (!row) {
         throw new Error(`nothing stored as instruction #${ruleId}; brain_export lists every id`);
       }
-      refuseOwner(row, principal, "instruction ", "retire");
       if (Number(row.active) === 0) return `retired · ${fill()}`;
       if (wanted.length === 0 || !String(row.text).includes(wanted)) {
         throw new Error(
@@ -153,7 +150,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
   function instructions(): Row[] {
     return host.sql(
       `SELECT rowid AS id, text AS text, when_scope AS scope, priority AS priority, at AS storedAt,
-        source AS source, owner AS owner, active AS active, superseded_key AS supersededKey
+        active AS active, superseded_key AS supersededKey
         FROM instructions ORDER BY rowid`,
     );
   }

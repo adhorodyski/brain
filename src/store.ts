@@ -13,11 +13,6 @@ export interface Limits {
   maxNote: number;
 }
 
-export interface Principal {
-  owner: string;
-  source: string;
-}
-
 export interface NoteInput {
   text: string;
   tags?: string;
@@ -100,18 +95,6 @@ const noteLine = (row: Row) => {
   return tags ? `${head} · ${row.text} ${tags}` : `${head} · ${row.text}`;
 };
 
-export const refuseOwner = (
-  row: Row,
-  principal: Principal,
-  prefix: string,
-  verb: string,
-) => {
-  if (String(row.owner) === principal.owner) return;
-  throw new Error(
-    `${prefix}#${row.id} belongs to ${row.owner || "no owner"}, not ${principal.owner}, so only its owner can ${verb} it`,
-  );
-};
-
 const fitsNote = (text: string, maxNote: number) => {
   if (text.length === 0) throw new Error("empty text stores nothing");
   if (text.length > maxNote) {
@@ -121,8 +104,8 @@ const fitsNote = (text: string, maxNote: number) => {
   }
 };
 
-const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, source, owner, dkey)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
+  VALUES (?, ?, ?, ?, ?, ?)`;
 
 export function createNoteStore(host: Host, limits: Limits) {
   const coreChars = () =>
@@ -145,15 +128,13 @@ export function createNoteStore(host: Host, limits: Limits) {
     return used;
   };
 
-  const insertNote = (note: NoteInput, text: string, key: string, at: string, owner: Principal) => {
+  const insertNote = (note: NoteInput, text: string, key: string, at: string) => {
     host.sql(INSERT_NOTE, [
       crypto.randomUUID(),
       text,
       parseTags(note.tags).join(" "),
       note.tier ?? "note",
       at,
-      owner.source,
-      owner.owner,
       key,
     ]);
     return Number(host.sql("SELECT last_insert_rowid() AS id")[0]?.id ?? 0);
@@ -176,16 +157,14 @@ export function createNoteStore(host: Host, limits: Limits) {
     return `${lines.join("\n")}\n## Related\n${neighbours.map(noteLine).join("\n")}`;
   }
 
-  async function remember(items: NoteInput[], principal: Principal): Promise<string> {
+  async function remember(items: NoteInput[]): Promise<string> {
     const notes = items.map((item) => {
       const text = flat(item.text);
       fitsNote(text, limits.maxNote);
       return { item, text, tags: parseTags(item.tags), tier: item.tier ?? "note" };
     });
     const keys = await Promise.all(
-      notes.map((note) =>
-        host.digest([principal.owner, note.tier, note.text, note.tags.join(" ")]),
-      ),
+      notes.map((note) => host.digest([note.tier, note.text, note.tags.join(" ")])),
     );
     const at = new Date().toISOString();
 
@@ -199,7 +178,7 @@ export function createNoteStore(host: Host, limits: Limits) {
         }
         const echo = nearDuplicateTags(host, note.tags).map((tag) => `existing tag: "${tag}"`);
         const used = note.tier === "core" ? coreRoom(note.text.length, 0) : 0;
-        const id = insertNote(note.item, note.text, keys[index], at, principal);
+        const id = insertNote(note.item, note.text, keys[index], at);
         const tail = [
           note.tier === "core" ? coreFill(used) : note.tier,
           ...echo,
@@ -210,26 +189,20 @@ export function createNoteStore(host: Host, limits: Limits) {
     });
   }
 
-  async function patch(
-    noteId: number,
-    confirm: string,
-    text: string,
-    principal: Principal,
-  ): Promise<string> {
+  async function patch(noteId: number, confirm: string, text: string): Promise<string> {
     const body = flat(text);
     fitsNote(body, limits.maxNote);
     const wanted = flat(confirm);
-    const key = await host.digest([principal.owner, String(noteId), wanted, body]);
+    const key = await host.digest([String(noteId), wanted, body]);
 
     return host.transaction(() => {
       const row = host.sql(
-        "SELECT rowid AS id, text AS text, tier AS tier, owner AS owner FROM notes WHERE rowid = ?",
+        "SELECT rowid AS id, text AS text, tier AS tier FROM notes WHERE rowid = ?",
         [noteId],
       )[0];
       if (!row) {
         throw new Error(`nothing stored as #${noteId}; run brain_recall and use a number it prints`);
       }
-      refuseOwner(row, principal, "", "change");
 
       const current = String(row.text);
       if (current === body) return `patched #${noteId}`;
@@ -240,10 +213,9 @@ export function createNoteStore(host: Host, limits: Limits) {
       }
 
       const used = String(row.tier) === "core" ? coreRoom(body.length, current.length) : 0;
-      host.sql("UPDATE notes SET text = ?, at = ?, source = ?, dkey = ? WHERE rowid = ?", [
+      host.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE rowid = ?", [
         body,
         new Date().toISOString(),
-        principal.source,
         key,
         noteId,
       ]);
@@ -253,15 +225,14 @@ export function createNoteStore(host: Host, limits: Limits) {
     });
   }
 
-  function forget(noteId: number, confirm: string, principal: Principal): string {
+  function forget(noteId: number, confirm: string): string {
     const wanted = flat(confirm);
     return host.transaction(() => {
       const row = host.sql(
-        "SELECT rowid AS id, text AS text, owner AS owner FROM notes WHERE rowid = ?",
+        "SELECT rowid AS id, text AS text FROM notes WHERE rowid = ?",
         [noteId],
       )[0];
       if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
-      refuseOwner(row, principal, "", "delete");
       if (wanted.length === 0 || !String(row.text).includes(wanted)) {
         throw new Error(
           `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
@@ -274,8 +245,8 @@ export function createNoteStore(host: Host, limits: Limits) {
 
   function notes(): Row[] {
     return host.sql(
-      `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt,
-        source AS source, owner AS owner FROM notes ORDER BY rowid`,
+      `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt
+        FROM notes ORDER BY rowid`,
     );
   }
 

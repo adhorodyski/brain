@@ -1,4 +1,4 @@
-BRAIN_TOKENS=replace-with-openssl-rand-hex-32=adam,replace-with-another-hex-32=kate
+BRAIN_TOKEN=replace-with-openssl-rand-hex-32
 CORE_TOKENS=900
 MAX_NOTE=300
 INSTRUCT_TOKENS=300
