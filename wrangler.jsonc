@@ -6,7 +6,7 @@
   "observability": { "enabled": true },
   "access": {
     "dev": {
-      "aud": "replace-with-access-app-aud-tag",
+      "aud": "dev",
       "identity": { "email": "you@example.com" }
     }
   },

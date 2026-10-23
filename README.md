@@ -72,21 +72,13 @@ you (next week, different model): what's my garage code?
 
 ## Connect a host
 
+Brain is a regular MCP server at `https://<worker>.workers.dev/mcp`. Point any host at that URL.
+
 Cloudflare Access is the whole access control. Protect the Worker in **Workers & Pages → your Worker →
 Access**, pick who signs in, then turn on **Managed OAuth** in that app's advanced settings. The free plan
-covers 50 users, and Access answers for the Worker before any tool runs.
-
-```sh
-pi mcp add brain --url https://<worker>.workers.dev/mcp
-```
-
-No secret in the config. `pi mcp login brain` opens a browser once; pi keeps the refresh token in
-`~/.pi/agent/mcp-auth.json` and renews quietly after that. A 15-minute access token against a two-week grant
-session means one sign-in a fortnight, and Access re-checks you against the policy on every renewal. To cut
-someone off, drop them from the policy — no redeploy, nothing to rotate.
-
-A host that cannot do OAuth, or a script with no browser, takes an Access service token as
-`CF-Access-Client-Id` and `CF-Access-Client-Secret` instead. Codex, Cursor and Claude Code send both.
+covers 50 users. Access answers an unauthenticated request before any tool runs, so a host that speaks MCP
+authorization signs in in the browser and renews on its own afterwards. To cut someone off, drop them from the
+policy — no redeploy, nothing to rotate.
 
 ## Tools
 
@@ -119,9 +111,9 @@ only allows `localhost` without it, so a deploy that skips this answers every `t
 
 ## Run it
 
-`wrangler dev` needs `access.dev.aud` set to your Access app's audience tag in `wrangler.jsonc`, and it will
-not start without it. That block is the local stand-in for a signed-in identity: change the email to test as
-someone else, delete it to test the refusal. Put `BRAIN_HOSTNAME` and the budgets in `.dev.vars`, then:
+`wrangler.jsonc` carries an `access.dev` block as the local stand-in for a signed-in identity: change the
+email to test as someone else, delete the block to test the refusal. Put `BRAIN_HOSTNAME` and the budgets in
+`.dev.vars`, then:
 
 ```sh
 npm install

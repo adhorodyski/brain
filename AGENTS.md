@@ -29,7 +29,7 @@ legacy name or default value for a dropped column. If a change seems to need one
 
 ## Traps
 
-These five are correct in the code today. Each has a plausible-looking edit that breaks it quietly.
+Each of these has a plausible-looking edit that breaks it quietly.
 
 - Splitting the DDL string on `;` destroys the FTS triggers, which contain semicolons. Statements go through
   `exec()` one at a time. The failure is silent: the worker boots and `recall` returns nothing forever.
@@ -37,9 +37,9 @@ These five are correct in the code today. Each has a plausible-looking edit that
   whenever Access did not authenticate the invocation — Access switched off, a hostname it does not cover, or
   `wrangler dev` with no `access.dev` block. Drop the `?.` and those requests throw a TypeError and answer 500,
   which hosts read as the endpoint being down; keep it and they answer 403 and go sign in.
-- `access.dev.aud` in `wrangler.jsonc` is what gives `wrangler dev` an identity, and wrangler refuses to start
-  with the block present and `aud` missing. Delete the whole block and local dev 403s like a Worker with no
-  Access rule, which reads as broken code rather than missing config.
+- `access.dev.identity` in `wrangler.jsonc` is what gives `wrangler dev` an identity, and `access.dev.aud`
+  beside it is required by wrangler even though no code reads `ctx.access.aud`. Drop `identity` and dev 403s;
+  drop `aud` and dev refuses to boot; delete the block and dev 403s like a Worker with no Access rule.
 - `dkey` hashes the normalised write args, not the JSON-RPC id. Hosts number requests from 1 per session, so an
   id-keyed dedupe collides across clients and reports a fresh write as a duplicate.
 - The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
