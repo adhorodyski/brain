@@ -28,8 +28,7 @@ default owner. If a change needs one, ask the spec.
   quietly creates nothing and `recall` returns nothing forever. Those triggers are the whole index sync, creation is
   guarded on `sqlite_master` for `notes`, and a schema change is checked by `count(*)` parity with `notes_ft`.
 - `export` mirrors its JSON into `content` as well as `structuredContent`: pi shows the structured half only when `content`
-  is empty.
-- Writes go through `ctx.storage.transactionSync`; a `BEGIN` through `sql.exec` is refused.
+  is empty. Writes go through `ctx.storage.transactionSync`; a `BEGIN` through `sql.exec` is refused.
 - The standing-instruction block rides on every result, refusals included, and is built **after** the write, so `learn`
   reports the state it just caused. `brain_learn`'s description is the only nudge a host gets: it carries the trigger
   phrases and *call it before answering*, so review it in diffs.
