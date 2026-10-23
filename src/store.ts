@@ -84,15 +84,7 @@ function nearDuplicateTags(host: Host, tags: string[]): string[] {
     ),
   ];
   return tags
-    .map((tag) =>
-      stored.find(
-        (candidate) =>
-          candidate !== tag &&
-          candidate.length > 2 &&
-          candidate.length + tag.length >= 9 &&
-          withinGap(tag, candidate, TAG_NEAR),
-      ),
-    )
+    .map((tag) => stored.find((candidate) => candidate !== tag && withinGap(tag, candidate, TAG_NEAR)))
     .filter((match): match is string => match !== undefined);
 }
 
