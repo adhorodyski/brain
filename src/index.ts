@@ -34,10 +34,7 @@ export default {
     const path = new URL(request.url).pathname;
 
     if (path === "/health") {
-      return Response.json({
-        brain: "memory",
-        owners: (env.BRAIN_TOKENS ?? "").split(",").filter(Boolean).length,
-      });
+      return Response.json({ ok: true });
     }
 
     if (path !== "/mcp") return new Response("not found", { status: 404 });

@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "tsc --noEmit",
-    "spec": "python3 scripts/spec-html.py MEMORY-DESIGN.md MEMORY-DESIGN.html"
+    "check": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
