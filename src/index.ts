@@ -1,40 +1,63 @@
-import { getAgentByName } from "agents";
-import { Assistant } from "./assistant";
-import { door, isTrusted } from "./door";
-import { BRAIN_NAME } from "./tools";
+import {
+  bearerAuthChallengeResponse,
+  createMcpHandler,
+  hostHeaderValidationResponse,
+  localhostAllowedHostnames,
+  OAuthError,
+  requireBearerAuth,
+} from "@modelcontextprotocol/server";
+import { Brain } from "./brain";
+import { brainServer } from "./mcp";
 
-export { Assistant };
+export { Brain };
+
+const YEAR_SECONDS = 365 * 24 * 60 * 60;
+const BRAIN_ID = "brain";
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request, env): Promise<Response> {
     const path = new URL(request.url).pathname;
 
-    if (path === "/health") return Response.json({ brain: BRAIN_NAME(env) });
-
-    if (path === "/telegram/webhook" && request.method === "POST") {
-      if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
-        return new Response("forbidden", { status: 403 });
-      }
-
-      const update = (await request.json().catch(() => undefined)) as
-        | { update_id: number; message?: { chat?: { id?: number }; text?: string } }
-        | undefined;
-      const text = update?.message?.text?.trim();
-      const chatId = String(update?.message?.chat?.id ?? "");
-
-      // Telegram retries a webhook that stays silent, well before a brain turn finishes.
-      if (text && chatId === env.TELEGRAM_CHAT_ID) {
-        const brain = await getAgentByName(env.Assistant, BRAIN_NAME(env));
-        await brain.queue("deliverTurn", { text, chatId, operationId: `tg${update!.update_id}` });
-      }
-      return new Response("ok");
+    if (path === "/health") {
+      return Response.json({ ok: true });
     }
 
-    if (path === "/mcp") {
-      if (!isTrusted(request, env)) return new Response("unauthorized", { status: 401 });
-      return door(env)(request, env, ctx);
-    }
+    if (path !== "/mcp") return new Response("not found", { status: 404 });
 
-    return new Response("not found", { status: 404 });
+    const allowed = env.BRAIN_HOSTNAME
+      ? [env.BRAIN_HOSTNAME, ...localhostAllowedHostnames()]
+      : localhostAllowedHostnames();
+    const refused = hostHeaderValidationResponse(request, allowed);
+    if (refused) return refused;
+
+    const gate = requireBearerAuth({
+      verifier: {
+        verifyAccessToken: async (token) => {
+          if (!env.BRAIN_TOKEN || token !== env.BRAIN_TOKEN)
+            throw new OAuthError("invalid_token", "unknown token");
+          return {
+            token,
+            clientId: "brain",
+            scopes: ["brain"],
+            expiresAt: Math.floor(Date.now() / 1000) + YEAR_SECONDS,
+          };
+        },
+      },
+    });
+
+    const auth = await gate(request);
+    if (auth instanceof Response) return auth;
+
+    const brain = env.Brain.get(env.Brain.idFromName(BRAIN_ID));
+    const handler = createMcpHandler(() => brainServer(brain), {
+      onerror: (error) => console.error("mcp:", error.message),
+    });
+
+    try {
+      return await handler.fetch(request, { authInfo: auth });
+    } catch (error) {
+      if (error instanceof OAuthError) return bearerAuthChallengeResponse(error);
+      throw error;
+    }
   },
 } satisfies ExportedHandler<Env>;

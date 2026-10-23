@@ -1,26 +1,5 @@
-# Copy to .dev.vars for `npm run dev`. On the deployed worker, TELEGRAM_*, BRAIN_TOKEN and
-# MODEL_API_KEY are secrets, and the two MODEL_ settings below are vars set outside the repo.
-
-# Any OpenAI-compatible chat endpoint. MODEL_ID goes on the wire unchanged.
-MODEL_BASE_URL=https://your-provider.example/v1
-MODEL_ID=your-model-name
-MODEL_API_KEY=sk-your-key
-
-# Optional, and only needed if the endpoint disagrees with these defaults:
-# MODEL_CONTEXT_WINDOW=128000
-# MODEL_MAX_TOKENS=8192
-# MODEL_REASONING=true
-
-TELEGRAM_BOT_TOKEN=123456:ABC-def
-TELEGRAM_WEBHOOK_SECRET=replace-with-openssl-rand-hex-24
-TELEGRAM_CHAT_ID=123456789
 BRAIN_TOKEN=replace-with-openssl-rand-hex-32
-
-# Optional: narrow what a fetch may reach. Unset means any public host; private and loopback hosts
-# are refused either way. A bare host matches that host alone, so list the wildcard too. WEB_BLOCKED_HOSTS
-# wins over WEB_ALLOWED_HOSTS.
-# WEB_ALLOWED_HOSTS=example.com,*.wikipedia.org
-# WEB_BLOCKED_HOSTS=*.example.internal
-
-# Optional: only needed once you serve a custom hostname.
-# BRAIN_HOSTNAME=brain.example.com
+CORE_TOKENS=900
+MAX_NOTE=300
+INSTRUCT_TOKENS=300
+TIMEZONE=Australia/Brisbane
