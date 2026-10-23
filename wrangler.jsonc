@@ -3,19 +3,9 @@
   "name": "durable-personal-agent",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-19",
-  "compatibility_flags": ["nodejs_compat"],
-
-  // A deploy deletes every var the config does not name, so this keeps the MODEL_* values set with
-  // `wrangler deploy --var` or in the dashboard. Secrets are never deleted by a deploy.
-  "keep_vars": true,
-
-  // Workers AI turns a fetched page into Markdown. Format conversions are free; the free tier also
-  // allows 10,000 neurons a day.
-  "ai": { "binding": "AI" },
-
   "observability": { "enabled": true },
   "durable_objects": {
-    "bindings": [{ "name": "Assistant", "class_name": "Assistant" }]
+    "bindings": [{ "name": "Brain", "class_name": "Brain" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Assistant"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Brain"] }]
 }

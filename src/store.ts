@@ -1,262 +1,313 @@
-import { MAX_NOTE, WHEN_HELP } from "./tools";
+export type SqlValue = string | number | null;
+export type Row = Record<string, SqlValue>;
+export type Sql = (statement: string, values?: readonly SqlValue[]) => Row[];
 
-export type Tier = "note" | "core";
+export interface Host {
+  sql: Sql;
+  transaction<T>(body: () => T): T;
+  digest(parts: readonly string[]): Promise<string>;
+}
 
-export type Note = { noteId: number; text: string; tags: string; tier: Tier; storedAt: string };
+export interface Limits {
+  coreTokens: number;
+  maxNote: number;
+}
 
-export type MemoryHost = {
-  sql: (statement: string, values?: unknown[]) => Record<string, unknown>[];
-  // The Agent scheduler reads these two shapes differently: a string parses as cron, a Date fires once.
-  arm: (when: string | Date, payload: { message: string }) => Promise<{ id: string }>;
-  disarm: (scheduleId: string) => Promise<boolean>;
+export interface Principal {
+  owner: string;
+  source: string;
+}
+
+export interface NoteInput {
+  text: string;
+  tags?: string;
+  tier?: "note" | "core";
+}
+
+const TOKEN_CHARS = 3.5;
+export const budgetChars = (tokens: number) => Math.floor(tokens * TOKEN_CHARS);
+export const percent = (used: number, limit: number) =>
+  limit <= 0 ? 0 : Math.round((used / limit) * 100);
+
+const INVISIBLE =
+  /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+const TAG_GAP = /[\s,]+/;
+const TAG_NEAR = 2;
+const STOP_WORDS = new Set([
+  "also",
+  "always",
+  "another",
+  "because",
+  "being",
+  "should",
+  "thanks",
+  "that",
+  "their",
+  "there",
+  "these",
+  "this",
+  "with",
+  "without",
+  "would",
+]);
+
+export function flat(text: string): string {
+  return text.replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
+}
+
+function parseTags(raw: string | undefined): string[] {
+  return [...new Set(flat(raw ?? "").toLowerCase().split(TAG_GAP).filter(Boolean))].sort();
+}
+
+const renderTags = (stored: string) => parseTags(stored).map((tag) => `#${tag}`).join(" ");
+
+function toFtsQuery(raw: string): string {
+  const words = flat(raw)
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => `"${word.replaceAll('"', '""')}"`);
+  if (words.length === 0) return '""';
+  if (words.length === 1) return `${words[0]}* OR ${words[0]}`;
+  return words.join(" OR ");
+}
+
+function withinGap(a: string, b: string, limit: number): boolean {
+  if (Math.abs(a.length - b.length) > limit) return false;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const value = Math.min(
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+        previous[j] + 1,
+        current[j - 1] + 1,
+      );
+      current.push(value);
+      if (value < best) best = value;
+    }
+    if (best > limit) return false;
+    previous = current;
+  }
+  return previous[b.length] <= limit;
+}
+
+function nearDuplicateTags(host: Host, tags: string[]): string[] {
+  if (tags.length === 0) return [];
+  const stored = [
+    ...new Set(
+      host
+        .sql("SELECT DISTINCT tags FROM notes")
+        .flatMap((row) => parseTags(String(row.tags ?? ""))),
+    ),
+  ];
+  return tags
+    .map((tag) =>
+      stored.find(
+        (candidate) =>
+          candidate !== tag &&
+          candidate.length > 2 &&
+          Math.abs(candidate.length - tag.length) <= 2 &&
+          candidate.length + tag.length >= 9 &&
+          withinGap(tag, candidate, TAG_NEAR),
+      ),
+    )
+    .filter((match): match is string => match !== undefined);
+}
+
+const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS storedAt,
+  notes.text AS text, notes.tags AS tags
+  FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
+  WHERE notes_ft MATCH ?`;
+const NOTE_RANK = " ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?";
+
+const noteLine = (row: Row) => {
+  const tags = renderTags(String(row.tags ?? ""));
+  const head = `#${row.id} · [${row.tier}] · stored ${String(row.storedAt).slice(0, 10)}`;
+  return tags ? `${head} · ${row.text} ${tags}` : `${head} · ${row.text}`;
 };
 
-export const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS notes (key TEXT PRIMARY KEY, text TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '', tier TEXT NOT NULL DEFAULT 'note', at TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS plans (key TEXT PRIMARY KEY, message TEXT NOT NULL, at TEXT, every TEXT, schedule_id TEXT, created_at TEXT NOT NULL)`,
-];
+export const refuseOwner = (
+  row: Row,
+  principal: Principal,
+  prefix: string,
+  verb: string,
+) => {
+  if (String(row.owner) === principal.owner) return;
+  throw new Error(
+    `${prefix}#${row.id} belongs to ${row.owner || "no owner"}, not ${principal.owner}, so only its owner can ${verb} it`,
+  );
+};
 
-export function migrate(sql: MemoryHost["sql"]): void {
-  const columns = sql("SELECT name FROM pragma_table_info('notes')").map((row) => String(row.name));
-  if (!columns.includes("tier")) sql("ALTER TABLE notes ADD COLUMN tier TEXT NOT NULL DEFAULT 'note'");
-}
-
-const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
-
-/** One line, nothing hidden: whitespace first, so a newline becomes a space before controls go. */
-export function flat(text: string): string {
-  return text.replace(/\s+/g, " ").replace(INVISIBLE, "").replace(/ {2,}/g, " ").trim();
-}
-
-const CHARS_PER_TOKEN = 4;
-const TOKENS = (text: string): number => Math.ceil(text.length / CHARS_PER_TOKEN);
-
-function accepted(text: string): string {
-  const body = flat(text);
-  if (!body) throw new Error("Say what to remember.");
-  if (body.length > MAX_NOTE) {
+const fitsNote = (text: string, maxNote: number) => {
+  if (text.length === 0) throw new Error("empty text stores nothing");
+  if (text.length > maxNote) {
     throw new Error(
-      `A note is ${MAX_NOTE} characters at most and this is ${body.length}: make it ${String(body.length - MAX_NOTE)} shorter, or split it into separate items.`,
+      `a note is at most ${maxNote} characters and that is ${text.length}: make it ${text.length - maxNote} shorter, or split it into two notes`,
     );
   }
-  return body;
-}
+};
 
-export function createMemory(host: MemoryHost, coreBudgetTokens: number) {
-  const changes = () => Number(host.sql("SELECT changes() AS n")[0]?.n ?? 0);
+const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, source, owner, dkey)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
 
-  const note = (key: string, text: string, tags: string, tier: Tier): number => {
-    host.sql("INSERT OR IGNORE INTO notes (key, text, tags, tier, at) VALUES (?, ?, ?, ?, ?)", [
-      key,
+export function createNoteStore(host: Host, limits: Limits) {
+  const coreChars = () =>
+    Number(
+      host.sql("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM notes WHERE tier = 'core'")[0]
+        ?.chars ?? 0,
+    );
+  const coreLimit = () => budgetChars(limits.coreTokens);
+  const coreFill = (used: number) =>
+    `core ${used}/${coreLimit()} (${percent(used, coreLimit())}%)`;
+
+  const coreRoom = (add: number, replace: number) => {
+    const limit = coreLimit();
+    const used = coreChars() - replace + add;
+    if (used > limit) {
+      throw new Error(
+        `the core tier holds ${coreChars() - replace} of its ${limit} characters and this note needs ${add}, which is ${used - limit} over. Shorten it, store it as a note, or retire a core note with brain_forget`,
+      );
+    }
+    return used;
+  };
+
+  const insertNote = (note: NoteInput, text: string, key: string, at: string, owner: Principal) => {
+    host.sql(INSERT_NOTE, [
+      crypto.randomUUID(),
       text,
-      tags,
-      tier,
-      new Date().toISOString(),
+      parseTags(note.tags).join(" "),
+      note.tier ?? "note",
+      at,
+      owner.source,
+      owner.owner,
+      key,
     ]);
-    return changes();
+    return Number(host.sql("SELECT last_insert_rowid() AS id")[0]?.id ?? 0);
   };
 
-  const find = (noteId: number): Stored | undefined =>
-    host.sql("SELECT rowid AS noteId, text, tier FROM notes WHERE rowid = ?", [noteId])[0] as
-      | Stored
-      | undefined;
+  function recall(query: string, limit: number): string {
+    const hits = host.sql(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
+    if (hits.length === 0) return `nothing stored matching "${flat(query).slice(0, 120)}"`;
 
-  const coreUsed = (): number => {
-    const rows = host.sql("SELECT text FROM notes WHERE tier = 'core'") as unknown as Pick<Note, "text">[];
-    return TOKENS(rows.map((row) => row.text).join("\n"));
-  };
+    const lines = hits.map(noteLine);
+    const tags = parseTags(String(hits[0].tags ?? ""));
+    if (hits.length > 3 || tags.length === 0) return lines.join("\n");
 
-  const rememberBatch = (
-    items: { text: string; tags?: string; tier?: Tier }[],
-    batch: string,
-  ): string => {
-    const bodies = items.map((item) => ({
-      text: accepted(item.text),
-      tags: flat(item.tags ?? ""),
-      tier: item.tier ?? "note",
-    }));
-    const incoming = bodies.filter((body) => body.tier === "core").reduce((sum, body) => sum + TOKENS(body.text), 0);
+    const seen = hits.map((row) => Number(row.id));
+    const neighbours = host.sql(
+      `${NOTE_SELECT} AND notes.rowid NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
+      [toFtsQuery(tags.join(" ")), ...seen, 3],
+    );
+    if (neighbours.length === 0) return lines.join("\n");
+    return `${lines.join("\n")}\n## Related\n${neighbours.map(noteLine).join("\n")}`;
+  }
 
-    if (incoming > 0) {
-      const used = coreUsed();
-      if (used + incoming > coreBudgetTokens) {
+  async function remember(items: NoteInput[], principal: Principal): Promise<string> {
+    const notes = items.map((item) => {
+      const text = flat(item.text);
+      fitsNote(text, limits.maxNote);
+      return { item, text, tags: parseTags(item.tags), tier: item.tier ?? "note" };
+    });
+    const keys = await Promise.all(
+      notes.map((note) =>
+        host.digest([principal.owner, note.tier, note.text, note.tags.join(" ")]),
+      ),
+    );
+    const at = new Date().toISOString();
+
+    return host.transaction(() => {
+      const lines: string[] = [];
+      for (const [index, note] of notes.entries()) {
+        const dupe = host.sql("SELECT rowid AS id FROM notes WHERE dkey = ?", [keys[index]])[0];
+        if (dupe) {
+          lines.push(`stored #${dupe.id} (again, same call)`);
+          continue;
+        }
+        const echo = nearDuplicateTags(host, note.tags).map((tag) => `existing tag: "${tag}"`);
+        const used = note.tier === "core" ? coreRoom(note.text.length, 0) : 0;
+        const id = insertNote(note.item, note.text, keys[index], at, principal);
+        const tail = [
+          note.tier === "core" ? coreFill(used) : note.tier,
+          ...echo,
+        ].join(" · ");
+        lines.push(`stored #${id} · ${tail}`);
+      }
+      return lines.join("\n");
+    });
+  }
+
+  async function patch(
+    noteId: number,
+    confirm: string,
+    text: string,
+    principal: Principal,
+  ): Promise<string> {
+    const body = flat(text);
+    fitsNote(body, limits.maxNote);
+    const wanted = flat(confirm);
+    const key = await host.digest([principal.owner, String(noteId), wanted, body]);
+
+    return host.transaction(() => {
+      const again = host.sql("SELECT rowid AS id FROM notes WHERE dkey = ?", [key])[0];
+      if (again && Number(again.id) === noteId) return `patched #${noteId}`;
+
+      const row = host.sql(
+        "SELECT rowid AS id, text AS text, tier AS tier, owner AS owner FROM notes WHERE rowid = ?",
+        [noteId],
+      )[0];
+      if (!row) {
+        throw new Error(`nothing stored as #${noteId}; run brain_recall and use a number it prints`);
+      }
+      refuseOwner(row, principal, "", "change");
+
+      const current = String(row.text);
+      if (current === body) return `patched #${noteId}`;
+      if (wanted.length === 0 || !current.includes(wanted)) {
         throw new Error(
-          `core is at ${used}/${coreBudgetTokens} tokens and this adds ${incoming}: patch or forget a core item first, or save these as notes.`,
+          `#${noteId} does not contain "${wanted}"; it reads "${current}". Nothing changed — brain_patch needs a fragment of that note's own text`,
         );
       }
-    }
 
-    let stored = 0;
-    for (const [index, body] of bodies.entries()) stored += note(`${batch}:${index}`, body.text, body.tags, body.tier);
-    if (stored === 0) return "Nothing new stored.";
-
-    const after = coreUsed();
-    if (after === 0 || after * 5 < coreBudgetTokens * 4) return `Remembered ${stored} note(s).`;
-
-    const percentFull = Math.round((after / coreBudgetTokens) * 100);
-    return `Remembered ${stored} note(s). core now ${percentFull}% (${after}/${coreBudgetTokens} tokens) — patch or forget before adding more.`;
-  };
-
-  const coreBlock = (): string => {
-    const rows = host.sql(
-      "SELECT rowid AS noteId, text FROM notes WHERE tier = 'core' ORDER BY at ASC, rowid ASC",
-    ) as unknown as Pick<Note, "noteId" | "text">[];
-    const used = coreUsed();
-    const head = `core [${Math.round((used / coreBudgetTokens) * 100)}% — ${used}/${coreBudgetTokens} tokens]`;
-    if (rows.length === 0) return `${head}\nNothing in core yet.`;
-    return `${head}\n${rows.map((row) => `- #${row.noteId} ${row.text}`).join("\n")}`;
-  };
-
-  return {
-    rememberBatch,
-    coreBlock,
-
-    search(query: string, limit = 8): { lines: string[]; total: number } {
-      const words = query
-        .toLowerCase()
-        .split(/\s+/)
-        .map((word) => flat(word))
-        .filter(Boolean)
-        .slice(0, 8);
-      if (words.length === 0) return { lines: [], total: 0 };
-
-      const perWord = words.flatMap((word) => [`%${word}%`, `%${word}%`]);
-      const score = words
-        .map(() => "(CASE WHEN lower(text) LIKE ? THEN 2 ELSE 0 END + CASE WHEN lower(tags) LIKE ? THEN 1 ELSE 0 END)")
-        .join(" + ");
-      const match = words.map(() => "(lower(text) LIKE ? OR lower(tags) LIKE ?)").join(" OR ");
-
-      const rows = host.sql(
-        `SELECT rowid AS noteId, text, tags, tier, at AS storedAt, ${score} AS hits FROM notes WHERE ${match} ORDER BY hits DESC, at DESC LIMIT ?`,
-        [...perWord, ...perWord, Math.min(limit, 30)],
-      ) as unknown as (Note & { hits: number })[];
-
-      return {
-        total: rows.length,
-        lines: rows.map(
-          (row) =>
-            `#${row.noteId} ${row.text}${row.tags ? ` [${row.tags}]` : ""}${coreTag(row.tier)} (${row.storedAt.slice(0, 10)})`,
-        ),
-      };
-    },
-
-    forget(noteId: number, confirm: string): string {
-      const wanted = flat(confirm).toLowerCase();
-      if (!wanted) return "Name a few words of the note to confirm it — nothing was removed.";
-
-      const row = find(noteId);
-      if (!row) return `There is no note #${noteId}, so nothing was removed. Run recall for fresh numbers.`;
-      if (!agrees(row, wanted)) return mismatch(noteId, row, "removed");
-
-      host.sql("DELETE FROM notes WHERE rowid = ?", [row.noteId]);
-      return `Forgot #${row.noteId}: "${row.text}"`;
-    },
-
-    patch(noteId: number, confirm: string, text: string): string {
-      const wanted = flat(confirm).toLowerCase();
-      if (!wanted) return "Name a few words of the note to confirm it — nothing was changed.";
-
-      const body = accepted(text);
-      const row = find(noteId);
-      if (!row) return `There is no note #${noteId}, so nothing was changed. Run recall for fresh numbers.`;
-
-      if (!agrees(row, wanted)) {
-        // Run again after a restart, this call's own rewrite is what left the confirm words gone.
-        if (row.text === body) return `Patched #${row.noteId} already reads "${body}"${coreTag(row.tier)}.`;
-        return mismatch(noteId, row, "changed");
-      }
-
-      if (row.tier === "core") {
-        const used = coreUsed();
-        const after = used - TOKENS(row.text) + TOKENS(body);
-        if (after > coreBudgetTokens) {
-          throw new Error(
-            `core is at ${used}/${coreBudgetTokens} tokens and this rewrite lands on ${after}: shorten it, or patch it into a note instead.`,
-          );
-        }
-      }
-
-      host.sql("UPDATE notes SET text = ? WHERE rowid = ?", [body, row.noteId]);
-      return `Patched #${row.noteId}: "${row.text}" → "${body}"${coreTag(row.tier)}`;
-    },
-
-    async add(input: { id: string; message: string; at?: string; every?: string }): Promise<string> {
-      const at = input.at === undefined ? undefined : new Date(input.at);
-      if (at !== undefined && Number.isNaN(at.getTime())) {
-        throw new Error(`"${input.at}" is not a datetime. ${WHEN_HELP}`);
-      }
-      const when = input.every ?? at;
-      if (when === undefined) throw new Error(WHEN_HELP);
-
-      host.sql("INSERT OR IGNORE INTO plans (key, message, at, every, created_at) VALUES (?, ?, ?, ?, ?)", [
-        input.id,
-        input.message,
-        input.at ?? null,
-        input.every ?? null,
+      const used = String(row.tier) === "core" ? coreRoom(body.length, current.length) : 0;
+      host.sql("UPDATE notes SET text = ?, at = ?, source = ?, dkey = ? WHERE rowid = ?", [
+        body,
         new Date().toISOString(),
+        principal.source,
+        key,
+        noteId,
       ]);
-      if (changes() === 0) return "Already scheduled earlier — left as it was.";
+      return String(row.tier) === "core"
+        ? `patched #${noteId} · ${coreFill(used)}`
+        : `patched #${noteId}`;
+    });
+  }
 
-      try {
-        const armed = await host.arm(when, { message: input.message });
-        host.sql("UPDATE plans SET schedule_id = ? WHERE key = ?", [armed.id, input.id]);
-      } catch (error) {
-        host.sql("DELETE FROM plans WHERE key = ?", [input.id]);
-        throw error;
+  function forget(noteId: number, confirm: string, principal: Principal): string {
+    const wanted = flat(confirm);
+    return host.transaction(() => {
+      const row = host.sql(
+        "SELECT rowid AS id, text AS text, owner AS owner FROM notes WHERE rowid = ?",
+        [noteId],
+      )[0];
+      if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
+      refuseOwner(row, principal, "", "delete");
+      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
+        throw new Error(
+          `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
+        );
       }
+      host.sql("DELETE FROM notes WHERE rowid = ?", [noteId]);
+      return `forgot #${noteId}`;
+    });
+  }
 
-      return input.every
-        ? `Scheduled: every ${input.every} — "${brief(input.message)}"`
-        : `Scheduled: ${input.at} — "${brief(input.message)}"`;
-    },
+  function notes(): Row[] {
+    return host.sql(
+      `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt,
+        source AS source, owner AS owner FROM notes ORDER BY rowid`,
+    );
+  }
 
-    list(): string {
-      const rows = host.sql("SELECT key, message, at, every FROM plans ORDER BY created_at DESC LIMIT 30");
-      if (rows.length === 0) return "Nothing is scheduled.";
-      return rows
-        .map((row) => `${String(row.key).slice(-6)}: ${row.every ? `every ${row.every}` : row.at} — ${brief(String(row.message))}`)
-        .join("\n");
-    },
-
-    async cancel(id: string): Promise<string> {
-      const wanted = id.trim();
-      if (!wanted) return "Name an id from list to cancel — nothing was cancelled.";
-
-      const rows = host.sql("SELECT key, message, schedule_id FROM plans") as unknown as Plan[];
-      const matches = rows.filter((row) => row.key.endsWith(wanted));
-      if (matches.length === 0) return `There is no schedule ${wanted}, so nothing was cancelled. Run list for fresh ids.`;
-      if (matches.length > 1)
-        return `${matches.length} schedules end with ${wanted}, so nothing was cancelled. Cancel with a longer id:\n${matches
-          .map((row) => `  ${row.key}: "${brief(row.message)}"`)
-          .join("\n")}`;
-
-      const [match] = matches;
-      if (match.schedule_id) await host.disarm(match.schedule_id);
-      host.sql("DELETE FROM plans WHERE key = ?", [match.key]);
-      return `Cancelled ${match.key}: "${brief(match.message)}"`;
-    },
-  };
-}
-
-export type Memory = ReturnType<typeof createMemory>;
-
-type Plan = { key: string; message: string; schedule_id: string | null };
-
-type Stored = { noteId: number; text: string; tier: Tier };
-
-function coreTag(tier: Tier): string {
-  return tier === "core" ? " (core)" : "";
-}
-
-/** A confirm matches the note's own text, or the caller reports the mismatch instead of acting. */
-function agrees(row: Stored, wanted: string): boolean {
-  return row.text.toLowerCase().includes(wanted);
-}
-
-function mismatch(noteId: number, row: Stored, outcome: "removed" | "changed"): string {
-  return `Note #${noteId} is "${row.text}" — that is not the note you named, so nothing was ${outcome}.`;
-}
-
-function brief(text: string): string {
-  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+  return { recall, remember, patch, forget, notes };
 }

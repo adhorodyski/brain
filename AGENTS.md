@@ -1,166 +1,126 @@
 # AGENTS.md
 
-Notes for agents working in this repo. Read [README.md](README.md) for setup.
+Notes for agents working in this repo. [MEMORY-DESIGN.md](MEMORY-DESIGN.md) is the source of truth: it is the
+spec v0 was built to, and it outranks this file wherever they disagree. [README.md](README.md) is the setup
+guide. Update all three when the surface moves.
 
 ## House rules
 
-**No code comments unless one records third-party behaviour we cannot change.** A comment that restates
-what the next line does is a smell: rename, extract, or type until it is unnecessary, and if renaming
-cannot help, write the clearer structure and record nothing. What a reader must know that no construct
-can hold lives here, not in the source. What survives in `src/` is exactly that: what pi, `agents`, and
-OpenAI-compatible endpoints do (the two notes in `src/web.ts` and the one in `src/model.ts`), the scheduler
-note on `MemoryHost.arm`, the Telegram retry note in `src/index.ts`, and the empty-list note in
-`src/web.ts`. The whole `Env` interface is uncommented because the README's vars table already says what
-every var does — add a var there, not as a doc comment here.
+**No code comments. None.** Not line, not block, not JSDoc, not TODO. Zero comments wins outright for this
+project, including the "records third-party behaviour" exception other repos allow. If a line feels
+underdocumented, rename or extract until it is not; if prose is genuinely required, it belongs in
+MEMORY-DESIGN.md or README.md.
+
+**No automated tests, and no test runner.** That is a decision, not a gap. The whole surface is one MCP
+endpoint over DO SQLite and every behaviour is answerable in seconds with `curl` or a `pi` client against
+`wrangler dev`. Do not add vitest, a test file, or a dev dependency for either. Verification is the spec's
+table, and the checks in it are what "I changed this" must satisfy.
+
+**No backward compatibility, no speculative scaffolding.** Greenfield: `SCHEMA` creates the final shape, and
+there is no `migrate()`, no column guard, no feature flag, and no legacy path to keep. If a change needs one,
+that is a design question for the spec, not an implementation detail.
+
+**YAGNI against the spec's Non-goals list.** No reminders, curation, web fetch, `ask`, Telegram, push,
+tenancy, vectors, OAuth 2.1, or UI. Two runtime dependencies, `@modelcontextprotocol/server` and `zod`, and
+no `nodejs_compat`. Anything past that is a scope decision.
 
 ## What this is
 
-One Cloudflare Worker. One Durable Object, `Assistant`, named by `BRAIN_NAME` in `src/tools.ts`. It
-hosts a Pi Durable agent through `PiHarness`. Several doors, one conversation thread: Telegram and MCP
-today, and a door is only a guard plus a route, so the count is not load-bearing.
-
-## Where things live
+One Worker, one Durable Object class `Brain`, SQLite storage. Two tables plus an FTS5 index, seven
+`brain_`-prefixed tools, one `/mcp` endpoint. **No model runs on the request path** — hosts do the thinking
+and this answers from SQLite in milliseconds.
 
 | File | Contents |
 |---|---|
-| `src/index.ts` | The routes (`/health`, `/telegram/webhook`, `/mcp`) and their guards. The Telegram route verifies the webhook secret, allowlists the chat ID, and pushes the turn onto the Agent's durable queue. |
-| `src/assistant.ts` | The Agent class. Builds the memory store, installs the tools, owns `PiHarness`, `turnWithin()`, and every door-facing method. The `PiHarness` seam lives here and nowhere else. |
-| `src/tools.ts` | `defineTool` definitions for the tools the brain sees, the `preamble` and `core` prompt sections, `MAX_NOTE`, `DEFAULT_CORE_TOKENS`, `WHEN_HELP`, and `BRAIN_NAME`. |
-| `src/web.ts` | Cloudflare's `web_fetch` installed for the brain, the same tool run once for the door's `readPage()`, one `webPolicy()` behind both, and `renamesContentToOutput()` to let Cloudflare's adapter run on pi-durable 1.3. |
-| `src/store.ts` | Notes in two tiers, and plans, in SQLite. Also `flat()`, the `core` budget, `SCHEMA`, and `migrate()`. Module-scope factory, so the door and the brain read one table. |
-| `src/door.ts` | The MCP mount: the tools the bearer token unlocks, and `isTrusted()`. |
-| `src/telegram.ts` | `send()`, with the 4096-character split. |
-| `src/model.ts` | Declares one provider from the `MODEL_*` vars, which live on the worker rather than in `wrangler.jsonc`. Any OpenAI-compatible endpoint. The `MODEL_ID` you declare is the string sent on the wire. |
-| `src/env.d.ts` | The `Env` shape, uncommented by rule. Every var is described in the README's optional vars table or in setup step 4. |
-| `scripts/set-webhook.sh` | Sets the Telegram webhook URL and shared secret. |
+| `src/index.ts` | `/health`, `/mcp`, the host guard, and the bearer verifier that turns `BRAIN_TOKENS` into an owner. |
+| `src/brain.ts` | The `Brain` DO. Owns the DDL, the `Host` adapter (SQL, transaction, digest), and the one method per tool that `mcp.ts` calls. The only place a DO is constructed. |
+| `src/store.ts` | Every note rule, in plain TypeScript over an injected `{ sql, transaction, digest }`. Zero Cloudflare imports. `flat`, `toFtsQuery`, the tag gap, the budgets, the refusals. |
+| `src/instruct.ts` | The instructions table, its budget, newest-wins supersede, and the standing-instruction block renderer. |
+| `src/mcp.ts` | `McpServer` and the seven `registerTool` calls — the only place a tool is described. Also the shared result wrapper that appends the block. |
+| `src/env.d.ts` | The `Env` shape, uncommented by rule; every var is described in the README's table. |
+
+`createMcpHandler` is stateless per request, so each tool's callback resolves the DO stub once and makes
+**one RPC call** returning one object. Keep that boundary thin: `mcp.ts` holds no state and `Brain` stays the
+only writer.
 
 ## Constraints that are easy to get wrong
 
-- **`Agent.sql` is a tagged template**, written as ``this.sql`SELECT ...```, not `(query, values)`. Parameterised and
-  ad-hoc statements go through `this.ctx.storage.sql.exec(query, ...values)`, which is what the store's
-  `sql` host function wraps.
-- **`defineTool` results use `output`, not `content`.** `ToolExecutionResult` names the field the model
-  reads `output`; MCP's `CallToolResult` uses `content`, and only `src/door.ts` speaks that shape. The
-  adapters in `agents/*/pi` still return `content` — they target pi-durable 1.1 and earlier — so install
-  one only through `renamesContentToOutput()` in `src/web.ts`, which renames *and deletes* `content`.
-  Renaming alone
-  settles the call with no text: no type error, no log, an empty result for the model. Both keys present
-  would store every fetched page twice, since the settled result is what gets persisted.
-- **`createModels()` takes options, not a provider array.** Use `createModels()` then `setProvider()`.
-- **Only `@callable` methods and plain public methods reachable from worker code cross the DO RPC
-  boundary.** `stub.memory` is private and cannot be read from `src/door.ts`. That is why the door calls the
-  thin methods at the bottom of `Assistant` (`recall`, `remember`, `patch`, `forget`, `plan`, `ask`).
-- **`this.schedule(when, "callbackName", payload)` takes the callback as a string** naming a method on the
-  class. `planFired` is that method.
-- **One conversation thread, the root session.** Do not add `sessions.create()` or `fork()`. Every door
-  writes that one transcript, which is the whole point of having several of them.
-- **A turn outlives whoever asked for it.** `turnWithin()` gives up on `harness.wait` after its budget
-  and returns null, which becomes a "still working" reply — the turn itself keeps running and is never
-  lost, so asking again reads the same thread and usually answers fast. `operationId` is what makes a
-  redelivered request rejoin that turn instead of paying for it twice, so Telegram's `update_id` and a
-  fresh `ask`/`plan` UUID are the right keys. Do not make the budget a timeout that aborts the turn.
-- **Telegram retries a webhook that stays silent**, long before a brain turn finishes, so
-  `src/index.ts` answers 200 first and pushes onto the durable queue. The reply still lands if the
-  object is evicted mid-thought. The answer is sent once and never edited afterward.
-- **`schedule()` validates before it writes, and deletes its row when arming fails.** A row in `plans`
-  with no `schedule_id` behind it lists forever and never fires, and a rejected `at` that wrote its row
-  would sit in that list too. Keep both orders.
-- **`notes.at` and `plans.at` mean different things** — when a note was stored, and when a plan fires.
-  `search` reads the note column back as `storedAt` so the row type says which; keep the alias if you
-  touch that query, because SQLite hands back the alias verbatim and a snake_case alias silently
-  undefineds the date in every recall line.
-- **`patch` is `replay: "safe"` because it recognises its own work.** Its `confirm` words come from
-  the text it is about to replace, so replaying a committed `patch` fails that check and would report
-  a mismatch for a change that already landed. The `row.text === body` branch ahead of the refusal is
-  what makes the rerun answer truthfully. `forget` needs no such branch, because deleting a row that is
-  already gone deletes nothing.
-- **`notes.tier` decides whether a note costs every future request.** `core` renders into the `core`
-  prompt section on every turn and is bounded by `CORE_TOKENS`, while `note` is uncapped and reachable
-  only through `recall`. Keep the budget check inside `rememberBatch` and `patch` rather than in the
-  tool, so the MCP door cannot walk past it either, and keep the refusal a throw. A write that
-  truncates quietly leaves the brain quoting half a fact forever. Do not move a note into `core` to fix
-  a recall miss, because that trades a search failure for a permanent tax.
-- **`flat()` runs on every note and tag written, and on every line rendered into the prompt.** It
-  collapses whitespace and strips invisible codepoints, so a note cannot carry a hidden instruction
-  into a section the model re-reads each turn, and cannot break the one-line shape that the `core`
-  block and recall lines depend on. It also runs on the way out, for rows stored before it existed.
-- **`search` matches tags as well as text, and joins its words with OR.** Both are load-bearing and
-  invisible when they break. A tag no query can reach is decoration, and AND-ing the whole query means
-  a long question about one fact returns nothing. The `hits` score is why the argument list passes
-  `perWord` twice: the CASE block and the WHERE block each consume their own bindings, so one spread
-  misbinds silently and matches nothing.
-- **The `#number` in a recall line is a SQLite `rowid`, and rowids get reused.** Deleting the highest
-  note frees its number for the next note written, so a handle read from a stale recall can point at
-  unrelated text. That is why `forget` needs the number *and* words from the note itself and refuses
-  when the two disagree — it is the guard against a confirmation drifting onto a different note. Do
-  not delete on the number alone, and do not make the handle stable by renumbering: that buys nothing
-  once the confirm check exists. Keep the refusal on an empty `confirm` too: `text.includes("")` is true
-  for every string, so without it a blank `confirm` matches any note and deletes the row the number names.
-- **`cancel` matches the id as a suffix and refuses unless exactly one plan ends with it**, quoting every
-  candidate when two do. `list` prints the last six characters of a key, so a full key is never in hand; a
-  `LIKE '%id'` that deleted every match let one call take out two plans on a short id, and `""` or `"%"`
-  let it wipe the table. The guard sits in the store, not only in the tool, so the MCP door cannot walk an
-  empty id into it either.
-
-## Decisions worth knowing before you change them
-
-- **The two tiers follow convergent practice rather than invention.** pi-pocket bounds its lessons and
-  injects them, Hermes caps `MEMORY.md` at 2,200 characters and prints the fill percentage, and
-  OpenClaw budgets its curated files and gates what promotes into them. All four landed on a small
-  always-in-context core over a large store behind a tool. The inversion this replaced, with everything
-  in context and curated facts behind `recall`, is the failure mode to avoid reintroducing. Provenance
-  columns and an approval queue for door-initiated writes are the known next steps, deliberately not
-  taken here.
-- **`migrate()` exists because `SCHEMA` cannot change a live table.** `CREATE TABLE IF NOT EXISTS` does
-  nothing against the deployed brain, so `tier` arrives by `ALTER TABLE` guarded on
-  `pragma_table_info`, which DO SQLite answers. The `'note'` default puts every pre-existing row in the
-  tier that costs nothing per turn. A wrong default would silently inflate every request the moment it
-  deployed.
-- **Writes from the terminal are direct SQLite writes**, not turns through the brain. That is what keeps a
-  note at roughly 80 tokens and stops the brain's transcript growing on every write. Do not route a write
-  tool through `ask`.
-- **One mount, one token.** `isTrusted()` in `src/door.ts` is a single comparison and `src/index.ts` 401s
-  before the handler runs, so the handler never sees an untrusted request. There is no lesser token to
-  hand out: `ask` cannot be one, because `PiSubmitOptions` accepts only `session`, `operationId`, and
-  `whenBusy` and so cannot restrict a turn's tools. An `ask` answer comes from an agent holding write
-  tools whoever asks. If a read-only mount ever returns, it is `recall` and `web_fetch` alone.
-- **`MODEL_BASE_URL` and `MODEL_ID` are set outside the repo**, with `wrangler deploy --var NAME:value` or
-  in the dashboard, and `wrangler.jsonc` carries `keep_vars: true` so a deploy does not delete them. Drop
-  that flag and the next deploy wipes both, after which every call answers `Set these worker vars: ...`
-  while `/health` keeps answering 200, so the dashboard looks healthy with a dead brain. Neither value is
-  secret, but keeping them off `main` is what makes `wrangler deploy` from a clean checkout safe.
-- **`web_fetch` is Cloudflare's, not ours.** `agents/webfetch/pi` brings the fence, the host policy, the
-  redirect re-checks, the byte cap, and the windowing, and it is the name models already know. Roll your
-  own and you inherit the job of fencing untrusted text again. Conversion runs through the `AI` binding,
-  so `wrangler.jsonc` must keep `"ai": { "binding": "AI" }`; format conversion is free and the free tier
-  allows 10,000 neurons a day. The door calls the brain's own tool rather than a second fetch path, so
-  both doors word a page and a refusal identically and `isError` survives the trip — keep it that way,
-  and keep `NO_TURN_API` honest: the adapter takes that argument as `_api` and never reads it.
-- **Every tool is `replay: "safe"`.** The tools that write notes and plans are keyed on the call that made it —
-  `api.taskId` and `api.callId` form the dedupe key (the key shape borrowed from pi-pocket, MIT), checked
-  inside the same transaction as the write — so rerunning one after an eviction changes nothing.
-  `forget` is safe without a key: deleting a row that is already gone deletes nothing. `web_fetch` is safe
-  for a different reason: it has no effect of ours to redo, and a completed result is
-  stored and not refetched. A tool that charges or writes outside this DO must be `replay: "unsafe"`.
-- **The tool list is the whole permission model.** Pi Durable has no approval step for tool calls, so
-  nothing can widen what the brain does at runtime. `ask` is door-only and runs a full turn; the rest
-  are direct SQLite reads and writes or a public fetch. There is no shell, no code execution, and
-  no credentials in anyone's accounts. What a page holds reaches the transcript only inside
-  `<untrusted_web_content>`, with a nested closing tag escaped, and loopback, private, and link-local
-  hosts are refused however `WEB_ALLOWED_HOSTS` reads — so `169.254.169.254` and `localhost` are
-  unreachable, which is the difference between reading the web and handing out the worker's own identity.
-- **There is no UI and there should not be one.** No ChatStorage, no WebSockets, no AG-UI, no Access. Both
-  doors are request/response. `PiHarness` and `session.events()` exist for streaming UIs and are unused.
-- **`PiHarness` is beta** and its API may change. Keep the seam inside `src/assistant.ts`.
+- **`DurableObject` is not a global.** Write `import { DurableObject } from "cloudflare:workers"`, or the
+  worker dies at load with a `ReferenceError`.
+- **The verifier throws `OAuthError("invalid_token", …)`, not `Error`.** A plain `Error` answers 500 where the
+  401 plus `WWW-Authenticate` a host needs to retry comes from `bearerAuthChallengeResponse`.
+- **`requireBearerAuth` refuses a token with no `expiresAt`.** Static tokens do not expire, so the verifier
+  stamps now + 1 year; without it every valid token is rejected.
+- **DDL is an array of statements, each `exec()`'d once.** The sync triggers contain semicolons, so splitting
+  the schema on `;` cuts them in half and creates nothing — quietly, and `recall` then returns nothing
+  forever. Two statements in one `exec()` are rejected outright. `CREATE TABLE IF NOT EXISTS` does nothing
+  against a live table, so schema creation is guarded on `sqlite_master` for `notes` and skips when present.
+  When the schema changes, check `count(*)` equality between `notes` and `notes_ft`: that is the drift canary.
+- **`dkey` is a hash of the normalised write arguments plus the owner**, never `ctx.mcpReq.id`. That id is the
+  JSON-RPC id and pi, Codex and Cursor all number it from 1 per session, so keying on it reports one
+  person's note as another's duplicate. Content is the right identity here: the same fact arriving twice is
+  one fact. The hash is written in the same transaction as the row, in both tables, and `UNIQUE` is the
+  guarantee.
+- **Transactions go through `ctx.storage.transactionSync`.** A `BEGIN` statement through `storage.sql.exec`
+  is refused at runtime.
+- **The three FTS triggers are the whole index sync.** External-content FTS5 does not stay in sync on its own
+  and needs its `'delete'` rows, so `store.ts` writes one `INSERT INTO notes` and stops. Without them a
+  `patch` leaves the old text searchable forever.
+- **`toFtsQuery` is built, never passed through.** Free text reaches `MATCH` and FTS5 throws on a stray
+  quote, bare `- * " (`, an empty string, and text containing `'); `. Single tokens go in as `"tok"* OR
+  "tok"` — prefix and exact, both ranked — and multi-word queries join with OR, because AND-ing a whole
+  question matches nothing. Tags match in the same query, so a tag no query can reach is decoration.
+- **Rowids are reused**, so the `#id` a recall line prints is not a stable handle. `patch`, `forget` and
+  `unlearn` all need the id **and** words from that row's own text and refuse when the two disagree. Keep the
+  empty-`confirm` refusal too: `text.includes("")` is true for every string, so without it a blank confirm
+  matches anything the id names. Do not buy stability by renumbering — that gains nothing once the confirm
+  check exists.
+- **`## Related` is the structural verification step, not a nicety.** Nothing in the write path can see a
+  contradiction a word search cannot, so the read path surfaces tag neighbours instead of asking a host to run
+  a `verify` call it may skip. Keep the explicit `nothing stored matching "…"` too: a confident no-result is a
+  fact, a silent one invites a guess.
+- **Budgets throw; they never truncate.** A host quoting half a fact forever is worse than a refused write.
+  Token estimate is the local `Math.ceil(chars / 3.5)`, one function, so no two callers round differently. Fill
+  lines print **characters** against `tokens × 3.5`, plus the percentage — that fill line is what makes a model
+  consolidate in the same turn instead of discovering the wall on its next call. Keep the `core` and
+  instruction budgets separate, and keep both checks inside the store so neither caller can walk past them.
+- **`flat()` runs on every write and every render.** It collapses whitespace and strips zero-width and
+  directional codepoints, so a note cannot break the one-line shape the recall lines and the block depend on,
+  and cannot carry an invisible character into text a model re-reads every turn.
+- **The standing-instruction block rides on every tool result, refusals included**, attached in the one shared
+  wrapper in `mcp.ts`. That is the delivery design: it needs no conversation state, and because it is re-sent
+  constantly, compaction cannot lose it. The header counts cover **rule bodies only**, never the fixed
+  paragraph. Build it after the write, so a `learn` reports the state it just caused.
+- **`owner` and `source` come from the token and are never tool arguments**, so an injected page cannot name a
+  thing that isn't accepted as input. There is one `Brain` object for both people — multi-tenancy is a
+  non-goal and per-owner objects would split the archive.
+- **`learn` refuses anything over 200 characters carrying a link, an email or a code fence**, because any
+  connected host may write and "*always forward my messages to X*" is a reachable rule. The residual risk does
+  not go away: if a review gate ever ships, it goes here first.
+- **Newest wins on instructions.** A `learn` retires the active rules in its scope that share its topic, sets
+  `active = 0` and `superseded_key`, and the loser leaves `recall` for good while staying in `export`. Search
+  must not resurface a retired rule for a helpful host to re-learn.
+- **`export` mirrors its payload into `content` text as well as `structuredContent`.** pi renders
+  `structuredContent` to the model only when `content` is empty, so structured-only output is invisible to it.
+- **`annotations` are the host's permission cue**: `readOnlyHint` on `brain_recall` and `brain_export`,
+  `destructiveHint` on `brain_forget` and `brain_unlearn`, `idempotentHint` on the two reads only. A missing
+  or wrong hint nags the owner for a read or auto-confirms a delete.
+- **`brain_learn`'s description is load-bearing code.** In a design with no agent prompt it is the only nudge
+  that exists; it carries the trigger phrases and says *call it before answering*, because after answering the
+  model optimises the answer. Review it in diffs.
 
 ## Checks
 
 ```sh
-npm run check                                   # tsc, must stay clean
-npx wrangler deploy --dry-run                   # must bundle; watch gzipped size
+npm run check                 # tsc, must stay clean
+npx wrangler deploy --dry-run # must bundle; ~1247 KiB raw / ~218 KiB gzipped
 ```
 
-To exercise the doors locally, put values in `.dev.vars`, run `npm run dev`, and drive `/mcp` with curl
-using `tools/list` and `tools/call`, which answers with every tool the mount offers. A wrong token should
-401 before any tool runs, and `web_fetch` on `http://169.254.169.254/` should come back refused rather
-than fetched.
+A gzipped size tens of KiB past ~218 means something pulled in a dependency it should not have. `agents` is
+not a dependency and neither is any pi package; take `createMcpHandler`, `requireBearerAuth` and
+`hostHeaderValidationResponse` from `@modelcontextprotocol/server` directly.
+
+Then drive it by hand: `npm run dev`, curl `/health`, curl `/mcp` unauthenticated (401 + `WWW-Authenticate`),
+curl `tools/list` with a bearer (exactly seven tools), and replay one `tools/call` twice to watch dedupe.
+Connect a real `pi` client with `pi mcp add brain --url … --bearer-token-env-var BRAIN_TOKEN` before trusting
+any change to the tool contract.
