@@ -33,24 +33,6 @@ const INVISIBLE =
   /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
 const TAG_GAP = /[\s,]+/;
 const TAG_NEAR = 2;
-const STOP_WORDS = new Set([
-  "also",
-  "always",
-  "another",
-  "because",
-  "being",
-  "should",
-  "thanks",
-  "that",
-  "their",
-  "there",
-  "these",
-  "this",
-  "with",
-  "without",
-  "would",
-]);
-
 export function flat(text: string): string {
   return text.replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
 }
@@ -107,7 +89,6 @@ function nearDuplicateTags(host: Host, tags: string[]): string[] {
         (candidate) =>
           candidate !== tag &&
           candidate.length > 2 &&
-          Math.abs(candidate.length - tag.length) <= 2 &&
           candidate.length + tag.length >= 9 &&
           withinGap(tag, candidate, TAG_NEAR),
       ),
@@ -249,9 +230,6 @@ export function createNoteStore(host: Host, limits: Limits) {
     const key = await host.digest([principal.owner, String(noteId), wanted, body]);
 
     return host.transaction(() => {
-      const again = host.sql("SELECT rowid AS id FROM notes WHERE dkey = ?", [key])[0];
-      if (again && Number(again.id) === noteId) return `patched #${noteId}`;
-
       const row = host.sql(
         "SELECT rowid AS id, text AS text, tier AS tier, owner AS owner FROM notes WHERE rowid = ?",
         [noteId],

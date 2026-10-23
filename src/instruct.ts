@@ -129,7 +129,6 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
 
   async function unlearn(ruleId: number, confirm: string, principal: Principal): Promise<string> {
     const wanted = flat(confirm);
-    const key = await host.digest([principal.owner, "retire", String(ruleId), wanted]);
     return host.transaction(() => {
       const row = host.sql(
         `SELECT rowid AS id, text AS text, owner AS owner, active AS active
@@ -140,15 +139,13 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
         throw new Error(`nothing stored as instruction #${ruleId}; brain_export lists every id`);
       }
       refuseOwner(row, principal, "instruction ", "retire");
-      if (Number(row.active) === 0 || host.sql("SELECT rowid AS id FROM instructions WHERE dkey = ?", [key])[0]) {
-        return `retired · ${fill()}`;
-      }
+      if (Number(row.active) === 0) return `retired · ${fill()}`;
       if (wanted.length === 0 || !String(row.text).includes(wanted)) {
         throw new Error(
           `instruction #${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
       }
-      host.sql("UPDATE instructions SET active = 0, dkey = ? WHERE rowid = ?", [key, ruleId]);
+      host.sql("UPDATE instructions SET active = 0 WHERE rowid = ?", [ruleId]);
       return `retired · ${fill()}`;
     });
   }
@@ -161,5 +158,5 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
     );
   }
 
-  return { block, learn, unlearn, instructions, fill };
+  return { block, learn, unlearn, instructions };
 }
