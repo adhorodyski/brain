@@ -87,11 +87,11 @@ token. One token is a deliberate limit, see *Single user* below.
 | Tool | Args | Returns |
 |---|---|---|
 | `brain_recall` | `query`, `limit?` | Ranked `#id · [tier] · stored <date> · text #tags`, plus a `## Related` block of tag neighbours |
-| `brain_remember` | `items[] { text, tags?, tier? }` | `stored #7 · core 612/3150 (19%)`, or `stored · again, same call` for a repeat |
-| `brain_patch` | `id`, `confirm`, `text` | `patched #7` |
-| `brain_forget` | `id`, `confirm` | `forgot #7` |
+| `brain_remember` | `items[] { text, tags?: string of topic words, tier? }` | `stored #7 · core 612/3150 (19%)`, or `stored · again, same call` for a repeat |
+| `brain_patch` | `id`, `confirm: string` copied from that note, `text` | `patched #7` |
+| `brain_forget` | `id`, `confirm: string` copied from that note | `forgot #7` |
 | `brain_learn` | `text`, `scope?` as `always`, `briefing`, `coding`, `writing` | `stored · 5 of 13 · 299/1050 (28%)` |
-| `brain_unlearn` | `id`, `confirm` | `retired · 3 of 12 · 193/1050 (18%)` |
+| `brain_unlearn` | `id`, `confirm: string` copied from that rule | `retired · 3 of 12 · 193/1050 (18%)` |
 | `brain_export` | none | Every note and instruction, retired rows included, as JSON |
 
 `tier` is `note` (free, searchable) or `core` (a small set that costs tokens on every request). Search ranks
