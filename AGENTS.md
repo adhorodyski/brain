@@ -45,6 +45,12 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
   from before its own row existed.
 
+- The empty-recall line is load-bearing prose, not a message. `nothing stored matching "x"` alone reads to a
+  host as a failed lookup, so it answers a miss by calling `brain_export` for the whole archive — 33 KB into
+  the conversation, twice, because `outputSchema` sends the same payload in `content` and `structuredContent`.
+  Say the miss is final and the host stops reaching; trimming the sentence looks like a cosmetic edit and the
+  dumping returns.
+
 ## Checks
 
 ```sh
@@ -60,4 +66,5 @@ unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from t
 ranks the garage note first; `"`, `((x`, a
 lone backslash and a blank query never raise `fts5: syntax error`; a near-miss tag echoes the stored one; the
 same write twice returns `again, same call` with one row; a retired rule stops matching searches but stays in
-`export`; an over-budget write throws and stores nothing.
+`export`; an over-budget write throws and stores nothing; and one `pi` prompt for a fact that was never
+stored answers "I don't know" after recall alone, with `brain_export` called zero times.
