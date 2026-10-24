@@ -135,7 +135,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
       )[0];
       if (!row) {
         throw new Error(
-          `nothing stored as instruction #${ruleId}; the standing instructions block prints the id of every rule still shaping replies`,
+          `nothing stored as instruction #${ruleId}; the standing instructions block prints the id of every live rule`,
         );
       }
       if (Number(row.active) === 0) return `retired · ${fill()}`;

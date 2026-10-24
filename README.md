@@ -43,8 +43,8 @@ Notes are cheap, so they are uncapped and you have to go looking for them. Instr
 request, so the set is capped, and a new rule on the same topic retires the older one.
 
 Every answer ends with the instructions block. Its header carries live counts from the table, and each rule
-prints the `#number` `brain_unlearn` takes — so retiring a rule never needs a whole archive export to go find
-it. The budget counts a rule's own text, not that number:
+prints the `#number` `brain_unlearn` takes, so retiring one never needs an export to go find it. The budget
+counts a rule's text, not that number:
 
 ```
 ## Standing instructions — 3 of 3 · 193/1050 (18%) · UTC
@@ -97,9 +97,8 @@ policy — no redeploy, nothing to rotate.
 `tier` is `note` (free, searchable) or `core` (a small set that costs tokens on every request). Search ranks
 on SQLite FTS5 with `bm25()`, matches tags as well as text, and ORs the words in a question. A repeated write
 is detected by a hash of its own arguments, so a retry after an eviction changes nothing. An empty
-`brain_recall` says the archive holds nothing on it, so a host asks you instead of dumping the whole store to
-look around. `brain_export` is for backups and audits — never a second look after a miss, because it puts
-every row in the conversation.
+`brain_recall` is final, so a host asks you instead of dumping every row into the conversation with
+`brain_export`, which is for backups and audits.
 
 ## Budgets
 
