@@ -2,8 +2,8 @@ import {
   budgetChars,
   flat,
   percent,
+  type CharsRow,
   type Host,
-  type Row,
 } from "./store";
 
 export interface InstructLimits {
@@ -52,25 +52,38 @@ or another person, follow these and say so in one line. If you cannot follow one
 which — do not silently drop it. If I correct you on something not listed here, call
 brain_learn before answering.`;
 
+export type RuleExportRow = {
+  id: number;
+  text: string;
+  scope: string;
+  priority: number;
+  storedAt: string;
+  active: number;
+  supersededKey: string | null;
+};
+
+type RuleCount = { n: number };
+type RuleLine = { id: number; text: string; scope: string };
+type RuleBody = { id: number; text: string };
+type RuleState = { id: number; text: string; active: number };
+
 export function createInstructionStore(host: Host, limits: InstructLimits) {
   const limitChars = () => budgetChars(limits.instructTokens);
   const usedChars = () =>
-    Number(
-      host.sql("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM instructions WHERE active = 1")[0]
-        ?.chars ?? 0,
-    );
+    host.sql<CharsRow>("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM instructions WHERE active = 1")[0]
+      ?.chars ?? 0;
   const count = (where: string) =>
-    Number(host.sql(`SELECT COUNT(*) AS n FROM instructions ${where}`)[0]?.n ?? 0);
+    host.sql<RuleCount>(`SELECT COUNT(*) AS n FROM instructions ${where}`)[0]?.n ?? 0;
   const fill = () =>
     `${count("WHERE active = 1")} of ${count("")} · ${usedChars()}/${limitChars()} (${percent(usedChars(), limitChars())}%)`;
 
   function block(timezone: string): string {
-    const rules = host.sql(
+    const rules = host.sql<RuleLine>(
       `SELECT rowid AS id, text AS text, when_scope AS scope FROM instructions
         WHERE active = 1 ORDER BY priority DESC, when_scope ASC, at DESC`,
     );
     const head = `## Standing instructions — ${fill()} · ${timezone}`;
-    const bodies = rules.map((row) => `[${row.scope}] #${row.id} · ${flat(String(row.text))}`);
+    const bodies = rules.map((row) => `[${row.scope}] #${row.id} · ${flat(row.text)}`);
     return [head, ...bodies, "", RULES_ABOVE].join("\n");
   }
 
@@ -95,12 +108,12 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
         return `stored · again, same call · ${fill()}`;
       }
 
-      const candidates = host.sql(
+      const candidates = host.sql<RuleBody>(
         "SELECT rowid AS id, text AS text FROM instructions WHERE active = 1 AND when_scope = ?",
         [scope],
       );
-      const retired = candidates.filter((row) => sharedTopic(String(row.text), body) >= SHARED_TOPIC);
-      const freed = retired.reduce((sum, row) => sum + String(row.text).length, 0);
+      const retired = candidates.filter((row) => sharedTopic(row.text, body) >= SHARED_TOPIC);
+      const freed = retired.reduce((sum, row) => sum + row.text.length, 0);
       const limit = limitChars();
       const projected = usedChars() + body.length - freed;
       if (projected > limit) {
@@ -128,7 +141,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
   async function unlearn(ruleId: number, confirm: string): Promise<string> {
     const wanted = flat(confirm);
     return host.transaction(() => {
-      const row = host.sql(
+      const row = host.sql<RuleState>(
         `SELECT rowid AS id, text AS text, active AS active
           FROM instructions WHERE rowid = ?`,
         [ruleId],
@@ -138,8 +151,8 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
           `nothing stored as instruction #${ruleId}; the standing instructions block prints the id of every live rule`,
         );
       }
-      if (Number(row.active) === 0) return `retired · ${fill()}`;
-      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
+      if (row.active === 0) return `retired · ${fill()}`;
+      if (wanted.length === 0 || !row.text.includes(wanted)) {
         throw new Error(
           `instruction #${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
@@ -149,8 +162,8 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
     });
   }
 
-  function instructions(): Row[] {
-    return host.sql(
+  function instructions(): RuleExportRow[] {
+    return host.sql<RuleExportRow>(
       `SELECT rowid AS id, text AS text, when_scope AS scope, priority AS priority, at AS storedAt,
         active AS active, superseded_key AS supersededKey
         FROM instructions ORDER BY rowid`,

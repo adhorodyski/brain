@@ -1,6 +1,6 @@
 export type SqlValue = string | number | null;
-export type Row = Record<string, SqlValue>;
-export type Sql = (statement: string, values?: readonly SqlValue[]) => Row[];
+export type SqlRow = Record<string, SqlValue>;
+export type Sql = <T extends SqlRow = SqlRow>(statement: string, values?: readonly SqlValue[]) => T[];
 
 export interface Host {
   sql: Sql;
@@ -15,9 +15,17 @@ export interface Limits {
 
 export interface NoteInput {
   text: string;
-  tags?: string;
-  tier?: "note" | "core";
+  tags: string;
+  tier: "note" | "core";
 }
+
+export type CharsRow = { chars: number };
+type NoteId = { id: number };
+type StoredTags = { tags: string };
+type NoteHit = { id: number; tier: string; storedAt: string; text: string; tags: string };
+type NoteBody = { id: number; text: string; tier: string };
+type NoteText = { id: number; text: string };
+export type NoteExportRow = { id: number; text: string; tags: string; tier: string; storedAt: string };
 
 const TOKEN_CHARS = 3.5;
 export const budgetChars = (tokens: number) => Math.floor(tokens * TOKEN_CHARS);
@@ -32,8 +40,8 @@ export function flat(text: string): string {
   return text.replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
 }
 
-function parseTags(raw: string | undefined): string[] {
-  return [...new Set(flat(raw ?? "").toLowerCase().split(TAG_GAP).filter(Boolean))].sort();
+function parseTags(raw: string): string[] {
+  return [...new Set(flat(raw).toLowerCase().split(TAG_GAP).filter(Boolean))].sort();
 }
 
 const renderTags = (stored: string) => parseTags(stored).map((tag) => `#${tag}`).join(" ");
@@ -55,18 +63,17 @@ function withinGap(a: string, b: string, limit: number): boolean {
     const current = [i];
     let best = i;
     for (let j = 1; j <= b.length; j += 1) {
-      const value = Math.min(
-        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-        previous[j] + 1,
-        current[j - 1] + 1,
-      );
+      const diagonal = previous[j - 1] ?? 0;
+      const dropped = previous[j] ?? 0;
+      const added = current[j - 1] ?? 0;
+      const value = Math.min(diagonal + (a[i - 1] === b[j - 1] ? 0 : 1), dropped + 1, added + 1);
       current.push(value);
       if (value < best) best = value;
     }
     if (best > limit) return false;
     previous = current;
   }
-  return previous[b.length] <= limit;
+  return (previous[b.length] ?? 0) <= limit;
 }
 
 function nearDuplicateTags(host: Host, tags: string[]): string[] {
@@ -74,8 +81,8 @@ function nearDuplicateTags(host: Host, tags: string[]): string[] {
   const stored = [
     ...new Set(
       host
-        .sql("SELECT DISTINCT tags FROM notes")
-        .flatMap((row) => parseTags(String(row.tags ?? ""))),
+        .sql<StoredTags>("SELECT DISTINCT tags FROM notes")
+        .flatMap((row) => parseTags(row.tags)),
     ),
   ];
   return tags
@@ -89,9 +96,9 @@ const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS s
   WHERE notes_ft MATCH ?`;
 const NOTE_RANK = " ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?";
 
-const noteLine = (row: Row) => {
-  const tags = renderTags(String(row.tags ?? ""));
-  const head = `#${row.id} · [${row.tier}] · stored ${String(row.storedAt).slice(0, 10)}`;
+const noteLine = (row: NoteHit) => {
+  const tags = renderTags(row.tags);
+  const head = `#${row.id} · [${row.tier}] · stored ${row.storedAt.slice(0, 10)}`;
   return tags ? `${head} · ${row.text} ${tags}` : `${head} · ${row.text}`;
 };
 
@@ -109,10 +116,8 @@ const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
 
 export function createNoteStore(host: Host, limits: Limits) {
   const coreChars = () =>
-    Number(
-      host.sql("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM notes WHERE tier = 'core'")[0]
-        ?.chars ?? 0,
-    );
+    host.sql<CharsRow>("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM notes WHERE tier = 'core'")[0]
+      ?.chars ?? 0;
   const coreLimit = () => budgetChars(limits.coreTokens);
   const coreFill = (used: number) =>
     `core ${used}/${coreLimit()} (${percent(used, coreLimit())}%)`;
@@ -133,24 +138,25 @@ export function createNoteStore(host: Host, limits: Limits) {
       crypto.randomUUID(),
       text,
       parseTags(note.tags).join(" "),
-      note.tier ?? "note",
+      note.tier,
       at,
       key,
     ]);
-    return Number(host.sql("SELECT last_insert_rowid() AS id")[0]?.id ?? 0);
+    return host.sql<NoteId>("SELECT last_insert_rowid() AS id")[0]?.id ?? 0;
   };
 
   function recall(query: string, limit: number): string {
-    const hits = host.sql(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
-    if (hits.length === 0)
+    const hits = host.sql<NoteHit>(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
+    const [lead] = hits;
+    if (!lead)
       return `nothing stored matching "${flat(query).slice(0, 120)}" — the archive holds nothing on this and another query will not find it, so ask the owner or say you do not know`;
 
     const lines = hits.map(noteLine);
-    const tags = parseTags(String(hits[0].tags ?? ""));
+    const tags = parseTags(lead.tags);
     if (hits.length > 3 || tags.length === 0) return lines.join("\n");
 
-    const seen = hits.map((row) => Number(row.id));
-    const neighbours = host.sql(
+    const seen = hits.map((row) => row.id);
+    const neighbours = host.sql<NoteHit>(
       `${NOTE_SELECT} AND notes.rowid NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
       [toFtsQuery(tags.join(" ")), ...seen, 3],
     );
@@ -162,24 +168,27 @@ export function createNoteStore(host: Host, limits: Limits) {
     const notes = items.map((item) => {
       const text = flat(item.text);
       fitsNote(text, limits.maxNote);
-      return { item, text, tags: parseTags(item.tags), tier: item.tier ?? "note" };
+      return { item, text, tags: parseTags(item.tags), tier: item.tier };
     });
-    const keys = await Promise.all(
-      notes.map((note) => host.digest([note.tier, note.text, note.tags.join(" ")])),
+    const writes = await Promise.all(
+      notes.map(async (note) => ({
+        ...note,
+        key: await host.digest([note.tier, note.text, note.tags.join(" ")]),
+      })),
     );
     const at = new Date().toISOString();
 
     return host.transaction(() => {
       const lines: string[] = [];
-      for (const [index, note] of notes.entries()) {
-        const dupe = host.sql("SELECT rowid AS id FROM notes WHERE dkey = ?", [keys[index]])[0];
+      for (const note of writes) {
+        const dupe = host.sql<NoteId>("SELECT rowid AS id FROM notes WHERE dkey = ?", [note.key])[0];
         if (dupe) {
           lines.push(`stored #${dupe.id} (again, same call)`);
           continue;
         }
         const echo = nearDuplicateTags(host, note.tags).map((tag) => `existing tag: "${tag}"`);
         const used = note.tier === "core" ? coreRoom(note.text.length, 0) : 0;
-        const id = insertNote(note.item, note.text, keys[index], at);
+        const id = insertNote(note.item, note.text, note.key, at);
         const tail = [
           note.tier === "core" ? coreFill(used) : note.tier,
           ...echo,
@@ -197,7 +206,7 @@ export function createNoteStore(host: Host, limits: Limits) {
     const key = await host.digest([String(noteId), wanted, body]);
 
     return host.transaction(() => {
-      const row = host.sql(
+      const row = host.sql<NoteBody>(
         "SELECT rowid AS id, text AS text, tier AS tier FROM notes WHERE rowid = ?",
         [noteId],
       )[0];
@@ -205,7 +214,7 @@ export function createNoteStore(host: Host, limits: Limits) {
         throw new Error(`nothing stored as #${noteId}; run brain_recall and use a number it prints`);
       }
 
-      const current = String(row.text);
+      const current = row.text;
       if (current === body) return `patched #${noteId}`;
       if (wanted.length === 0 || !current.includes(wanted)) {
         throw new Error(
@@ -213,28 +222,26 @@ export function createNoteStore(host: Host, limits: Limits) {
         );
       }
 
-      const used = String(row.tier) === "core" ? coreRoom(body.length, current.length) : 0;
+      const used = row.tier === "core" ? coreRoom(body.length, current.length) : 0;
       host.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE rowid = ?", [
         body,
         new Date().toISOString(),
         key,
         noteId,
       ]);
-      return String(row.tier) === "core"
-        ? `patched #${noteId} · ${coreFill(used)}`
-        : `patched #${noteId}`;
+      return row.tier === "core" ? `patched #${noteId} · ${coreFill(used)}` : `patched #${noteId}`;
     });
   }
 
   function forget(noteId: number, confirm: string): string {
     const wanted = flat(confirm);
     return host.transaction(() => {
-      const row = host.sql(
+      const row = host.sql<NoteText>(
         "SELECT rowid AS id, text AS text FROM notes WHERE rowid = ?",
         [noteId],
       )[0];
       if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
-      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
+      if (wanted.length === 0 || !row.text.includes(wanted)) {
         throw new Error(
           `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
         );
@@ -244,8 +251,8 @@ export function createNoteStore(host: Host, limits: Limits) {
     });
   }
 
-  function notes(): Row[] {
-    return host.sql(
+  function notes(): NoteExportRow[] {
+    return host.sql<NoteExportRow>(
       `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt
         FROM notes ORDER BY rowid`,
     );

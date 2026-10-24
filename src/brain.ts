@@ -1,10 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
-import { createInstructionStore } from "./instruct";
+import { createInstructionStore, type RuleExportRow } from "./instruct";
 import {
   createNoteStore,
   type Host,
+  type NoteExportRow,
   type NoteInput,
-  type Row,
+  type SqlRow,
   type SqlValue,
 } from "./store";
 
@@ -69,22 +70,22 @@ const numberFrom = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const noteRow = (row: Row) => ({
-  id: Number(row.id),
-  text: String(row.text),
-  tier: String(row.tier),
-  tags: String(row.tags),
-  storedAt: String(row.storedAt),
+const noteRow = (row: NoteExportRow) => ({
+  id: row.id,
+  text: row.text,
+  tier: row.tier,
+  tags: row.tags,
+  storedAt: row.storedAt,
 });
 
-const ruleRow = (row: Row) => ({
-  id: Number(row.id),
-  text: String(row.text),
-  scope: String(row.scope),
-  priority: Number(row.priority),
-  storedAt: String(row.storedAt),
-  active: Number(row.active) === 1,
-  supersededKey: row.supersededKey === null ? null : String(row.supersededKey),
+const ruleRow = (row: RuleExportRow) => ({
+  id: row.id,
+  text: row.text,
+  scope: row.scope,
+  priority: row.priority,
+  storedAt: row.storedAt,
+  active: row.active === 1,
+  supersededKey: row.supersededKey,
 });
 
 export class Brain extends DurableObject<Env> {
@@ -94,8 +95,8 @@ export class Brain extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const host: Host = {
-      sql: (statement, values) =>
-        [...this.ctx.storage.sql.exec<Record<string, SqlValue>>(statement, ...(values ?? []))],
+      sql: <T extends SqlRow>(statement: string, values?: readonly SqlValue[]) =>
+        [...this.ctx.storage.sql.exec<T>(statement, ...(values ?? []))],
       transaction: (body) => this.ctx.storage.transactionSync(body),
       digest: async (parts) => {
         const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("\u0000")));
@@ -155,8 +156,8 @@ export class Brain extends DurableObject<Env> {
   async export(): Promise<ExportReply> {
     const notes = this.notes.notes();
     const instructions = this.instructions.instructions();
-    const core = notes.filter((row) => String(row.tier) === "core").length;
-    const active = instructions.filter((row) => Number(row.active) === 1).length;
+    const core = notes.filter((row) => row.tier === "core").length;
+    const active = instructions.filter((row) => row.active === 1).length;
     return {
       standing: this.instructions.block(this.env.TIMEZONE ?? "UTC"),
       notes: notes.map(noteRow),

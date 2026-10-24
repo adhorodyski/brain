@@ -102,7 +102,14 @@ export function brainServer(brain: BrainHandle) {
     },
     async ({ items }) =>
       call(
-        () => brain.remember(items),
+        () =>
+          brain.remember(
+            items.map((item) => ({
+              text: item.text,
+              tags: item.tags ?? "",
+              tier: item.tier ?? "note",
+            })),
+          ),
         spoken,
       ),
   );
