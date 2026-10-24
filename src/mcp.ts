@@ -174,7 +174,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_unlearn",
     {
       title: "Retire an instruction",
-      description: `Retire one standing instruction. Takes the instruction id from brain_export, plus confirm, a fragment of that rule's own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history. ${FILL}`,
+      description: `Retire one standing instruction. Takes the #number the standing instructions block prints beside that rule, plus confirm, a fragment of that rule's own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history. ${FILL}`,
       inputSchema: z.object({
         id: z.number().int().min(1).describe("The instruction id"),
         confirm: z.string().describe("Words copied from that rule's text"),

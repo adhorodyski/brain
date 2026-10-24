@@ -70,7 +70,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
         WHERE active = 1 ORDER BY priority DESC, when_scope ASC, at DESC`,
     );
     const head = `## Standing instructions — ${fill()} · ${timezone}`;
-    const bodies = rules.map((row) => `[${row.scope}] ${flat(String(row.text))}`);
+    const bodies = rules.map((row) => `[${row.scope}] #${row.id} · ${flat(String(row.text))}`);
     return [head, ...bodies, "", RULES_ABOVE].join("\n");
   }
 
@@ -134,7 +134,9 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
         [ruleId],
       )[0];
       if (!row) {
-        throw new Error(`nothing stored as instruction #${ruleId}; brain_export lists every id`);
+        throw new Error(
+          `nothing stored as instruction #${ruleId}; the standing instructions block prints the id of every rule still shaping replies`,
+        );
       }
       if (Number(row.active) === 0) return `retired · ${fill()}`;
       if (wanted.length === 0 || !String(row.text).includes(wanted)) {
