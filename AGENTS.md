@@ -45,6 +45,17 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
   from before its own row existed.
 
+- The empty-recall line is load-bearing prose. `nothing stored matching "x"` alone reads as a failed lookup,
+  so the host calls `brain_export` for the whole archive — twice the payload, because `outputSchema` sends it
+  in `content` and `structuredContent`. The line has to claim the miss survives **another query**: wording it
+  about one question invites rephrasing, and a host that rephrases enough dumps anyway. Even worded this way
+  about one run in fifteen still dumps. That is host behaviour, not wording still to be found — do not read a
+  lone dump as a regression, and do not trim the sentence, which looks cosmetic and brings the dumps back.
+
+- The `#id` in the instructions block is the only place a host gets an instruction id. Remove it and
+  `brain_unlearn` needs an export to find its target — the pointer in the not-found error was never the cause,
+  the hidden id was.
+
 ## Checks
 
 ```sh
@@ -60,4 +71,6 @@ unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from t
 ranks the garage note first; `"`, `((x`, a
 lone backslash and a blank query never raise `fts5: syntax error`; a near-miss tag echoes the stored one; the
 same write twice returns `again, same call` with one row; a retired rule stops matching searches but stays in
-`export`; an over-budget write throws and stores nothing.
+`export`; an over-budget write throws and stores nothing. Then ask `pi`, over ~15 runs, for a fact that was
+never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
+fifteen. Ask it to retire a rule by name and it takes the id from the instructions block.

@@ -142,7 +142,8 @@ export function createNoteStore(host: Host, limits: Limits) {
 
   function recall(query: string, limit: number): string {
     const hits = host.sql(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
-    if (hits.length === 0) return `nothing stored matching "${flat(query).slice(0, 120)}"`;
+    if (hits.length === 0)
+      return `nothing stored matching "${flat(query).slice(0, 120)}" — the archive holds nothing on this and another query will not find it, so ask the owner or say you do not know`;
 
     const lines = hits.map(noteLine);
     const tags = parseTags(String(hits[0].tags ?? ""));
