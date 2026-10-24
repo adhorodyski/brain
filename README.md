@@ -95,7 +95,7 @@ policy — no redeploy, nothing to rotate.
 | `brain_export` | none | Every note and instruction, retired rows included, as JSON |
 
 `tier` is `note` (free, searchable) or `core` (a small set that costs tokens on every request). Search ranks
-on SQLite FTS5 with `bm25()`, matches tags as well as text, and ORs the words in a question. A repeated write
+on SQLite FTS5 with `bm25()`, weighs a tag match five times a text match, and ORs the words in a question. A repeated write
 is detected by a hash of its own arguments, so a retry after an eviction changes nothing. An empty
 `brain_recall` is final, so a host asks you instead of dumping every row into the conversation with
 `brain_export`, which is for backups and audits.

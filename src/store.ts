@@ -87,7 +87,8 @@ const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS s
   FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
   WHERE notes_ft MATCH ?`;
 const RELATED_ROWS = 3;
-const NOTE_RANK = " ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?";
+const TAG_WEIGHT = 5.0;
+const NOTE_RANK = ` ORDER BY bm25(notes_ft, 1.0, ${TAG_WEIGHT}) LIMIT ?`;
 
 const noteLine = (row: Row) => {
   const tags = renderTags(String(row.tags ?? ""));
