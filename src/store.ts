@@ -86,6 +86,7 @@ const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS s
   notes.text AS text, notes.tags AS tags
   FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
   WHERE notes_ft MATCH ?`;
+const RELATED_ROWS = 3;
 const NOTE_RANK = " ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?";
 
 const noteLine = (row: Row) => {
@@ -161,12 +162,12 @@ export function createNoteStore(host: Host, limits: Limits) {
 
     const lines = hits.map(noteLine);
     const tags = parseTags(String(hits[0].tags ?? ""));
-    if (hits.length > 3 || tags.length === 0) return lines.join("\n");
+    if (hits.length > RELATED_ROWS || tags.length === 0) return lines.join("\n");
 
     const seen = hits.map((row) => Number(row.id));
     const neighbours = host.sql(
       `${NOTE_SELECT} AND notes.rowid NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
-      [toFtsQuery(tags.join(" ")), ...seen, 3],
+      [toFtsQuery(tags.join(" ")), ...seen, RELATED_ROWS],
     );
     if (neighbours.length === 0) return lines.join("\n");
     return `${lines.join("\n")}\n## Related\n${neighbours.map(noteLine).join("\n")}`;
