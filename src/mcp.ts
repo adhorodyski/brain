@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ExportReply, Reply } from "./brain";
 import type { NoteInput } from "./store";
@@ -60,7 +60,7 @@ const exportShape = z.object({
 
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
-const spoken = (reply: Reply) => ({
+const spoken = (reply: Reply): CallToolResult => ({
   ...text(`${reply.text}\n\n${reply.standing}`),
   ...(reply.failed ? { isError: true } : {}),
 });
@@ -70,9 +70,6 @@ export function brainServer(brain: BrainHandle) {
     { name: "brain", version: "0.1.0" },
     { instructions: INSTRUCTIONS },
   );
-
-  const call = <T>(work: () => Promise<T>, say: (value: T) => { content: { type: "text"; text: string }[]; isError?: boolean }) =>
-    work().then(say);
 
   server.registerTool(
     "brain_recall",
@@ -85,11 +82,7 @@ export function brainServer(brain: BrainHandle) {
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },
-    async ({ query, limit }) =>
-      call(
-        () => brain.recall(query, limit ?? 8),
-        spoken,
-      ),
+    async ({ query, limit }) => brain.recall(query, limit ?? 8).then(spoken),
   );
 
   server.registerTool(
@@ -100,11 +93,7 @@ export function brainServer(brain: BrainHandle) {
       inputSchema: z.object({ items: z.array(noteItem).min(1).max(20) }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ items }) =>
-      call(
-        () => brain.remember(items),
-        spoken,
-      ),
+    async ({ items }) => brain.remember(items).then(spoken),
   );
 
   server.registerTool(
@@ -119,11 +108,7 @@ export function brainServer(brain: BrainHandle) {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ id, confirm, text: body }) =>
-      call(
-        () => brain.patch(id, confirm, body),
-        spoken,
-      ),
+    async ({ id, confirm, text: body }) => brain.patch(id, confirm, body).then(spoken),
   );
 
   server.registerTool(
@@ -137,11 +122,7 @@ export function brainServer(brain: BrainHandle) {
       }),
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ id, confirm }) =>
-      call(
-        () => brain.forget(id, confirm),
-        spoken,
-      ),
+    async ({ id, confirm }) => brain.forget(id, confirm).then(spoken),
   );
 
   server.registerTool(
@@ -163,11 +144,7 @@ export function brainServer(brain: BrainHandle) {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ text: body, scope }) =>
-      call(
-        () => brain.learn(body, scope ?? "always"),
-        spoken,
-      ),
+    async ({ text: body, scope }) => brain.learn(body, scope ?? "always").then(spoken),
   );
 
   server.registerTool(
@@ -181,11 +158,7 @@ export function brainServer(brain: BrainHandle) {
       }),
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ id, confirm }) =>
-      call(
-        () => brain.unlearn(id, confirm),
-        spoken,
-      ),
+    async ({ id, confirm }) => brain.unlearn(id, confirm).then(spoken),
   );
 
   server.registerTool(
@@ -197,20 +170,17 @@ export function brainServer(brain: BrainHandle) {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },
     async () =>
-      call(
-        () => brain.export(),
-        (reply: ExportReply) => {
-          const payload = {
-            notes: reply.notes,
-            instructions: reply.instructions,
-            counts: reply.counts,
-          };
-          return {
-            content: [{ type: "text" as const, text: `${JSON.stringify(payload)}\n\n${reply.standing}` }],
-            structuredContent: payload,
-          };
-        },
-      ),
+      brain.export().then((reply: ExportReply) => {
+        const payload = {
+          notes: reply.notes,
+          instructions: reply.instructions,
+          counts: reply.counts,
+        };
+        return {
+          ...text(`${JSON.stringify(payload)}\n\n${reply.standing}`),
+          structuredContent: payload,
+        };
+      }),
   );
 
   return server;
