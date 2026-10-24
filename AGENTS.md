@@ -48,8 +48,10 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - The empty-recall line is load-bearing prose, not a message. `nothing stored matching "x"` alone reads to a
   host as a failed lookup, so it answers a miss by calling `brain_export` for the whole archive — 33 KB into
   the conversation, twice, because `outputSchema` sends the same payload in `content` and `structuredContent`.
-  Say the miss is final and the host stops reaching; trimming the sentence looks like a cosmetic edit and the
-  dumping returns.
+  The line has to say the miss survives **another query**: naming just one question invites a rephrase, and a
+  host that rephrases seven times eventually dumps anyway. Even worded this way the dump drops to about one
+  run in fifteen rather than vanishing — do not read a single dump as this regressing, and do not trim the
+  sentence, which looks cosmetic and brings the behaviour back.
 
 - The `#id` printed beside each rule in the standing instructions block is the only place a host gets an
   instruction id. Remove it and `brain_unlearn` becomes uncallable without `brain_export` — the pointer in
@@ -70,7 +72,7 @@ unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from t
 ranks the garage note first; `"`, `((x`, a
 lone backslash and a blank query never raise `fts5: syntax error`; a near-miss tag echoes the stored one; the
 same write twice returns `again, same call` with one row; a retired rule stops matching searches but stays in
-`export`; an over-budget write throws and stores nothing; and one `pi` prompt for a fact that was never
-stored answers "I don't know" after recall alone, with `brain_export` called zero times. Same shape for a
-retire: ask `pi` to retire a rule by name and it takes the id from the standing instructions block, again with
-`brain_export` called zero times.
+`export`; an over-budget write throws and stores nothing. Then ask `pi`, over ~15 runs, for a fact that was
+never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
+fifteen — reduced, not gone, so a single dump is not new evidence of a regression. Same shape for a retire:
+ask `pi` to retire a rule by name and it takes the id from the standing instructions block.

@@ -78,7 +78,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_recall",
     {
       title: "Recall",
-      description: `Search the owner's notes and get back the matching lines, plus related rows that share their tags. Call it before answering anything about the owner, their plans, people, places, or codes. Reads nothing and writes nothing. An empty result means the note was never stored: it is a complete answer about one question, not a failed search. ${FILL}`,
+      description: `Search the owner's notes and get back the matching lines, plus related rows that share their tags. Call it before answering anything about the owner, their plans, people, places, or codes. Reads nothing and writes nothing. An empty result means the note was never stored, and another query will not find it — ask the owner rather than searching wider. ${FILL}`,
       inputSchema: z.object({
         query: z.string().describe("Words or a whole question; every word is OR-ed, tags included"),
         limit: z.number().int().min(1).max(30).optional().describe("Maximum rows, default 8"),
@@ -192,7 +192,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_export",
     {
       title: "Export the brain",
-      description: `Every note and every instruction, including retired ones, as JSON, with counts. Use it to back the archive up, to audit what a host wrote, or to find an instruction id to retire. Never reach for it after brain_recall finds nothing: an empty recall is already the whole archive's answer, and this dumps every row into the conversation. ${FILL}`,
+      description: `Every note and every instruction, including retired ones, as JSON, with counts. Use it to back the archive up, to audit what a host wrote, or to look at retired rules — live rule ids are already printed in the standing instructions block. Never reach for it after brain_recall finds nothing: another query will not find what the archive does not hold, and this dumps every row into the conversation. ${FILL}`,
       outputSchema: exportShape,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },

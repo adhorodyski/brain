@@ -97,9 +97,9 @@ policy — no redeploy, nothing to rotate.
 `tier` is `note` (free, searchable) or `core` (a small set that costs tokens on every request). Search ranks
 on SQLite FTS5 with `bm25()`, matches tags as well as text, and ORs the words in a question. A repeated write
 is detected by a hash of its own arguments, so a retry after an eviction changes nothing. An empty
-`brain_recall` is the archive's complete answer to that question, so it tells the host to ask you instead of
-searching again. `brain_export` is for backups, audits, and instruction ids — never a second look after a
-miss, because it puts every row in the conversation.
+`brain_recall` says the archive holds nothing on it, so a host asks you instead of dumping the whole store to
+look around. `brain_export` is for backups and audits — never a second look after a miss, because it puts
+every row in the conversation.
 
 ## Budgets
 
