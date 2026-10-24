@@ -1,5 +1,6 @@
 import {
   budgetChars,
+  confirmFragment,
   flat,
   percent,
   type Host,
@@ -139,11 +140,13 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
         );
       }
       if (Number(row.active) === 0) return `retired · ${fill()}`;
-      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
-        throw new Error(
-          `instruction #${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
-        );
-      }
+      confirmFragment(wanted, String(row.text), {
+        subject: `instruction #${ruleId}`,
+        outcome: "Nothing changed",
+        tool: "brain_unlearn",
+        kind: "rule",
+        source: "words",
+      });
       host.sql("UPDATE instructions SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
       return `retired · ${fill()}`;
     });

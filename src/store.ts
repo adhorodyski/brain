@@ -104,6 +104,21 @@ const fitsNote = (text: string, maxNote: number) => {
   }
 };
 
+export interface ConfirmClaim {
+  subject: string;
+  outcome: string;
+  tool: string;
+  kind: string;
+  source: string;
+}
+
+export function confirmFragment(wanted: string, current: string, claim: ConfirmClaim): void {
+  if (wanted.length > 0 && current.includes(wanted)) return;
+  throw new Error(
+    `${claim.subject} does not contain "${wanted}"; it reads "${current}". ${claim.outcome} — ${claim.tool} needs a fragment of that ${claim.kind}'s own ${claim.source}`,
+  );
+}
+
 const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
   VALUES (?, ?, ?, ?, ?, ?)`;
 
@@ -207,11 +222,13 @@ export function createNoteStore(host: Host, limits: Limits) {
 
       const current = String(row.text);
       if (current === body) return `patched #${noteId}`;
-      if (wanted.length === 0 || !current.includes(wanted)) {
-        throw new Error(
-          `#${noteId} does not contain "${wanted}"; it reads "${current}". Nothing changed — brain_patch needs a fragment of that note's own text`,
-        );
-      }
+      confirmFragment(wanted, current, {
+        subject: `#${noteId}`,
+        outcome: "Nothing changed",
+        tool: "brain_patch",
+        kind: "note",
+        source: "text",
+      });
 
       const used = String(row.tier) === "core" ? coreRoom(body.length, current.length) : 0;
       host.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE rowid = ?", [
@@ -234,11 +251,13 @@ export function createNoteStore(host: Host, limits: Limits) {
         [noteId],
       )[0];
       if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
-      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
-        throw new Error(
-          `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
-        );
-      }
+      confirmFragment(wanted, String(row.text), {
+        subject: `#${noteId}`,
+        outcome: "Nothing deleted",
+        tool: "brain_forget",
+        kind: "note",
+        source: "text",
+      });
       host.sql("DELETE FROM notes WHERE rowid = ?", [noteId]);
       return `forgot #${noteId}`;
     });
