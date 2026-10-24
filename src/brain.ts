@@ -2,9 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import { createInstructionStore } from "./instruct";
 import {
   createNoteStore,
-  type Host,
   type NoteInput,
   type Row,
+  type SqlPort,
   type SqlValue,
 } from "./store";
 
@@ -93,7 +93,7 @@ export class Brain extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    const host: Host = {
+    const port: SqlPort = {
       sql: (statement, values) =>
         [...this.ctx.storage.sql.exec<Record<string, SqlValue>>(statement, ...(values ?? []))],
       transaction: (body) => this.ctx.storage.transactionSync(body),
@@ -103,11 +103,11 @@ export class Brain extends DurableObject<Env> {
       },
     };
 
-    this.notes = createNoteStore(host, {
+    this.notes = createNoteStore(port, {
       coreTokens: numberFrom(env.CORE_TOKENS, 900),
       maxNote: numberFrom(env.MAX_NOTE, 300),
     });
-    this.instructions = createInstructionStore(host, {
+    this.instructions = createInstructionStore(port, {
       instructTokens: numberFrom(env.INSTRUCT_TOKENS, 300),
     });
     this.ensureSchema();

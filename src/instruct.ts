@@ -2,8 +2,8 @@ import {
   budgetChars,
   flat,
   percent,
-  type Host,
   type Row,
+  type SqlPort,
 } from "./store";
 
 export interface InstructLimits {
@@ -52,20 +52,20 @@ or another person, follow these and say so in one line. If you cannot follow one
 which — do not silently drop it. If I correct you on something not listed here, call
 brain_learn before answering.`;
 
-export function createInstructionStore(host: Host, limits: InstructLimits) {
+export function createInstructionStore(port: SqlPort, limits: InstructLimits) {
   const limitChars = () => budgetChars(limits.instructTokens);
   const usedChars = () =>
     Number(
-      host.sql("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM instructions WHERE active = 1")[0]
+      port.sql("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM instructions WHERE active = 1")[0]
         ?.chars ?? 0,
     );
   const count = (where: string) =>
-    Number(host.sql(`SELECT COUNT(*) AS n FROM instructions ${where}`)[0]?.n ?? 0);
+    Number(port.sql(`SELECT COUNT(*) AS n FROM instructions ${where}`)[0]?.n ?? 0);
   const fill = () =>
     `${count("WHERE active = 1")} of ${count("")} · ${usedChars()}/${limitChars()} (${percent(usedChars(), limitChars())}%)`;
 
   function block(timezone: string): string {
-    const rules = host.sql(
+    const rules = port.sql(
       `SELECT rowid AS id, text AS text, when_scope AS scope FROM instructions
         WHERE active = 1 ORDER BY priority DESC, when_scope ASC, at DESC`,
     );
@@ -89,13 +89,13 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
       );
     }
 
-    const key = await host.digest([scope, body]);
-    return host.transaction(() => {
-      if (host.sql("SELECT rowid AS id FROM instructions WHERE dkey = ?", [key])[0]) {
+    const key = await port.digest([scope, body]);
+    return port.transaction(() => {
+      if (port.sql("SELECT rowid AS id FROM instructions WHERE dkey = ?", [key])[0]) {
         return `stored · again, same call · ${fill()}`;
       }
 
-      const candidates = host.sql(
+      const candidates = port.sql(
         "SELECT rowid AS id, text AS text FROM instructions WHERE active = 1 AND when_scope = ?",
         [scope],
       );
@@ -111,12 +111,12 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
 
       const keyOfMine = crypto.randomUUID();
       for (const row of retired) {
-        host.sql("UPDATE instructions SET active = 0, superseded_key = ? WHERE rowid = ?", [
+        port.sql("UPDATE instructions SET active = 0, superseded_key = ? WHERE rowid = ?", [
           keyOfMine,
           row.id,
         ]);
       }
-      host.sql(
+      port.sql(
         `INSERT INTO instructions (key, text, when_scope, priority, at, active, superseded_key, dkey)
           VALUES (?, ?, ?, 0, ?, 1, NULL, ?)`,
         [keyOfMine, body, scope, new Date().toISOString(), key],
@@ -127,8 +127,8 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
 
   async function unlearn(ruleId: number, confirm: string): Promise<string> {
     const wanted = flat(confirm);
-    return host.transaction(() => {
-      const row = host.sql(
+    return port.transaction(() => {
+      const row = port.sql(
         `SELECT rowid AS id, text AS text, active AS active
           FROM instructions WHERE rowid = ?`,
         [ruleId],
@@ -144,13 +144,13 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
           `instruction #${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
       }
-      host.sql("UPDATE instructions SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
+      port.sql("UPDATE instructions SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
       return `retired · ${fill()}`;
     });
   }
 
   function instructions(): Row[] {
-    return host.sql(
+    return port.sql(
       `SELECT rowid AS id, text AS text, when_scope AS scope, priority AS priority, at AS storedAt,
         active AS active, superseded_key AS supersededKey
         FROM instructions ORDER BY rowid`,
