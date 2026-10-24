@@ -20,8 +20,13 @@ export interface NoteInput {
 }
 
 const TOKEN_CHARS = 3.5;
-export const budgetChars = (tokens: number) => Math.floor(tokens * TOKEN_CHARS);
-export const percent = (used: number, limit: number) => Math.round((used / limit) * 100);
+export function budgetChars(tokens: number): number {
+  return Math.floor(tokens * TOKEN_CHARS);
+}
+
+export function percent(used: number, limit: number): number {
+  return Math.round((used / limit) * 100);
+}
 
 const INVISIBLE =
   /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
@@ -35,7 +40,9 @@ function parseTags(raw: string | undefined): string[] {
   return [...new Set(flat(raw ?? "").toLowerCase().split(TAG_GAP).filter(Boolean))].sort();
 }
 
-const renderTags = (stored: string) => parseTags(stored).map((tag) => `#${tag}`).join(" ");
+function renderTags(stored: string): string {
+  return parseTags(stored).map((tag) => `#${tag}`).join(" ");
+}
 
 function toFtsQuery(raw: string): string {
   const words = flat(raw)
@@ -104,20 +111,20 @@ const RELATED_ROWS = 3;
 const TAG_WEIGHT = 5.0;
 const NOTE_RANK = ` ORDER BY bm25(notes_ft, 1.0, ${TAG_WEIGHT}) LIMIT ?`;
 
-const noteLine = (row: Row) => {
+function noteLine(row: Row): string {
   const tags = renderTags(String(row.tags ?? ""));
   const head = `#${row.id} · [${row.tier}] · stored ${String(row.storedAt).slice(0, 10)}`;
   return tags ? `${head} · ${row.text} ${tags}` : `${head} · ${row.text}`;
-};
+}
 
-const fitsNote = (text: string, maxNote: number) => {
+function fitsNote(text: string, maxNote: number): void {
   if (text.length === 0) throw new Error("empty text stores nothing");
   if (text.length > maxNote) {
     throw new Error(
       `a note is at most ${maxNote} characters and that is ${text.length}: make it ${text.length - maxNote} shorter, or split it into two notes`,
     );
   }
-};
+}
 
 export interface ConfirmClaim {
   subject: string;
