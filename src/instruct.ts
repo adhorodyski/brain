@@ -10,7 +10,7 @@ export interface InstructLimits {
   instructTokens: number;
 }
 
-const MAX_RULE = 200;
+export const MAX_RULE = 200;
 const SHARED_TOPIC = 0.25;
 const STOP_WORDS = new Set([
   "also",

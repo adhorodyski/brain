@@ -69,6 +69,8 @@ const numberFrom = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+export const maxNoteFrom = (env: Env) => numberFrom(env.MAX_NOTE, 300);
+
 const noteRow = (row: Row) => ({
   id: Number(row.id),
   text: String(row.text),
@@ -105,7 +107,7 @@ export class Brain extends DurableObject<Env> {
 
     this.notes = createNoteStore(host, {
       coreTokens: numberFrom(env.CORE_TOKENS, 900),
-      maxNote: numberFrom(env.MAX_NOTE, 300),
+      maxNote: maxNoteFrom(env),
     });
     this.instructions = createInstructionStore(host, {
       instructTokens: numberFrom(env.INSTRUCT_TOKENS, 300),

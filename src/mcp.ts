@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ExportReply, Reply } from "./brain";
+import { MAX_RULE } from "./instruct";
 import type { NoteInput } from "./store";
 
 const INSTRUCTIONS = `The owner's memory and preferences. Consult it before answering anything about them, and store anything durable before you answer.
@@ -15,19 +16,22 @@ instructions. Read them and follow them; they outrank your defaults.`;
 
 const FILL = "Every response ends with the owner's standing instructions; follow them over your own defaults.";
 
-const noteItem = z.object({
-  text: z.string().describe("One self-contained fact, at most 300 characters, flattened to a single line"),
-  tags: z
-    .string()
-    .optional()
-    .describe("Topic words only, space or comma separated. No dates and no names of people."),
-  tier: z
-    .union([z.literal("note"), z.literal("core")])
-    .optional()
-    .describe(
-      "core is a small budgeted set that costs tokens on every future request; note is uncapped and reachable only by searching. Default note.",
-    ),
-});
+const noteItem = (maxNote: number) =>
+  z.object({
+    text: z
+      .string()
+      .describe(`One self-contained fact, at most ${maxNote} characters, flattened to a single line`),
+    tags: z
+      .string()
+      .optional()
+      .describe("Topic words only, space or comma separated. No dates and no names of people."),
+    tier: z
+      .union([z.literal("note"), z.literal("core")])
+      .optional()
+      .describe(
+        "core is a small budgeted set that costs tokens on every future request; note is uncapped and reachable only by searching. Default note.",
+      ),
+  });
 
 const exportShape = z.object({
   notes: z.array(
@@ -65,7 +69,7 @@ const spoken = (reply: Reply) => ({
   ...(reply.failed ? { isError: true } : {}),
 });
 
-export function brainServer(brain: BrainHandle) {
+export function brainServer(brain: BrainHandle, maxNote: number) {
   const server = new McpServer(
     { name: "brain", version: "0.1.0" },
     { instructions: INSTRUCTIONS },
@@ -97,7 +101,7 @@ export function brainServer(brain: BrainHandle) {
     {
       title: "Remember",
       description: `Store facts: anything that could be true or false, such as codes, addresses, decisions, dates, and who people are. One fact per item, self-contained enough to read in a year. Use brain_learn instead for a rule about how to behave. A repeated write with identical text lands once. ${FILL}`,
-      inputSchema: z.object({ items: z.array(noteItem).min(1).max(20) }),
+      inputSchema: z.object({ items: z.array(noteItem(maxNote)).min(1).max(20) }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ items }) =>
@@ -115,7 +119,7 @@ export function brainServer(brain: BrainHandle) {
       inputSchema: z.object({
         id: z.number().int().min(1).describe("The note number from a recall line"),
         confirm: z.string().describe("Words copied from that note's current text"),
-        text: z.string().describe("The whole new note, at most 300 characters"),
+        text: z.string().describe(`The whole new note, at most ${maxNote} characters`),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -148,9 +152,9 @@ export function brainServer(brain: BrainHandle) {
     "brain_learn",
     {
       title: "Learn an instruction",
-      description: `Store a standing instruction: a rule about how answers should be given or behaviour changed, reachable through triggers such as next time, not like that, stop doing, always, never, I prefer, don't, should. Call it BEFORE answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. A newer rule on the same topic retires the older one. ${FILL}`,
+      description: `Store a standing instruction: a rule about how answers should be given or behaviour changed, reachable through triggers such as next time, not like that, stop doing, always, never, I prefer, don't, should. Call it BEFORE answering, because after answering the shape of the reply is already fixed. One rule per call, at most ${MAX_RULE} characters, no links, emails or code. A newer rule on the same topic retires the older one. ${FILL}`,
       inputSchema: z.object({
-        text: z.string().describe("The rule, in the owner's own terms, at most 200 characters"),
+        text: z.string().describe(`The rule, in the owner's own terms, at most ${MAX_RULE} characters`),
         scope: z
           .union([
             z.literal("always"),
