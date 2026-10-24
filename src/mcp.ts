@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ExportReply, Reply } from "./brain";
 import type { NoteInput } from "./store";
+import { version } from "../package.json";
 
 const INSTRUCTIONS = `The owner's memory and preferences. Consult it before answering anything about them, and store anything durable before you answer.
 
@@ -67,7 +68,7 @@ const spoken = (reply: Reply) => ({
 
 export function brainServer(brain: BrainHandle) {
   const server = new McpServer(
-    { name: "brain", version: "0.1.0" },
+    { name: "brain", version },
     { instructions: INSTRUCTIONS },
   );
 
