@@ -64,8 +64,8 @@ const SCHEMA = [
   )`,
 ];
 
-const numberFrom = (value: string | undefined, fallback: number) => {
-  const parsed = Number(value);
+const wholeNumberFrom = (value: string | undefined, fallback: number) => {
+  const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
@@ -104,11 +104,11 @@ export class Brain extends DurableObject<Env> {
     };
 
     this.notes = createNoteStore(host, {
-      coreTokens: numberFrom(env.CORE_TOKENS, 900),
-      maxNote: numberFrom(env.MAX_NOTE, 300),
+      coreTokens: wholeNumberFrom(env.CORE_TOKENS, 900),
+      maxNote: wholeNumberFrom(env.MAX_NOTE, 300),
     });
     this.instructions = createInstructionStore(host, {
-      instructTokens: numberFrom(env.INSTRUCT_TOKENS, 300),
+      instructTokens: wholeNumberFrom(env.INSTRUCT_TOKENS, 300),
     });
     this.ensureSchema();
   }

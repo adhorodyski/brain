@@ -21,8 +21,7 @@ export interface NoteInput {
 
 const TOKEN_CHARS = 3.5;
 export const budgetChars = (tokens: number) => Math.floor(tokens * TOKEN_CHARS);
-export const percent = (used: number, limit: number) =>
-  limit <= 0 ? 0 : Math.round((used / limit) * 100);
+export const percent = (used: number, limit: number) => Math.round((used / limit) * 100);
 
 const INVISIBLE =
   /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
