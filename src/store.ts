@@ -77,12 +77,17 @@ function nearestTag(tag: string, stored: string[]): string | undefined {
   return near.sort((a, b) => a.edits - b.edits || (a.candidate < b.candidate ? -1 : 1))[0].candidate;
 }
 
+const TAG_SCAN_ROWS = 500;
+
 function nearDuplicateTags(host: Host, tags: string[]): string[] {
   if (tags.length === 0) return [];
   const stored = [
     ...new Set(
       host
-        .sql("SELECT DISTINCT tags FROM notes")
+        .sql(
+          "SELECT DISTINCT tags FROM (SELECT tags, rowid FROM notes ORDER BY rowid DESC LIMIT ?)",
+          [TAG_SCAN_ROWS],
+        )
         .flatMap((row) => parseTags(String(row.tags ?? ""))),
     ),
   ];
