@@ -38,13 +38,17 @@ function parseTags(raw: string | undefined): string[] {
 
 const renderTags = (stored: string) => parseTags(stored).map((tag) => `#${tag}`).join(" ");
 
+const ftsWord = (word: string) => {
+  const phrase = `"${word.replaceAll('"', '""')}"`;
+  return `(${phrase}* OR ${phrase})`;
+};
+
 function toFtsQuery(raw: string): string {
   const words = flat(raw)
     .split(" ")
     .filter(Boolean)
-    .map((word) => `"${word.replaceAll('"', '""')}"`);
+    .map(ftsWord);
   if (words.length === 0) return '""';
-  if (words.length === 1) return `${words[0]}* OR ${words[0]}`;
   return words.join(" OR ");
 }
 
