@@ -104,8 +104,8 @@ const fitsNote = (text: string, maxNote: number) => {
   }
 };
 
-const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
-  VALUES (?, ?, ?, ?, ?, ?)`;
+const INSERT_NOTE = `INSERT INTO notes (text, tags, tier, at, dkey)
+  VALUES (?, ?, ?, ?, ?)`;
 
 export function createNoteStore(host: Host, limits: Limits) {
   const coreChars = () =>
@@ -130,7 +130,6 @@ export function createNoteStore(host: Host, limits: Limits) {
 
   const insertNote = (note: NoteInput, text: string, key: string, at: string) => {
     host.sql(INSERT_NOTE, [
-      crypto.randomUUID(),
       text,
       parseTags(note.tags).join(" "),
       note.tier ?? "note",

@@ -33,7 +33,6 @@ export interface ExportReply {
 
 const SCHEMA = [
   `CREATE TABLE notes (
-    key    TEXT PRIMARY KEY,
     text   TEXT NOT NULL,
     tags   TEXT NOT NULL DEFAULT '',
     tier   TEXT NOT NULL DEFAULT 'note',
