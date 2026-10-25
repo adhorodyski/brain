@@ -3,8 +3,9 @@ import {
   nearDuplicates,
   toFtsQuery,
   wordList,
+  type CountRow,
+  type IdRow,
   type SqlPort,
-  type Row,
 } from "./store";
 
 export const MAX_RULE = 200;
@@ -18,23 +19,35 @@ const NOT_BEHAVIOUR: [RegExp, string][] = [
 
 const sameWords = (left: string, right: string) => wordList(left).join(" ") === wordList(right).join(" ");
 
+type RuleMatchRow = { id: number; text: string; topics: string };
+type RuleCandidateRow = { id: number; text: string };
+type RuleStateRow = { id: number; text: string; active: number };
+type StoredTopicsRow = { topics: string };
+
+export type RuleExportRow = {
+  id: number;
+  text: string;
+  topics: string;
+  storedAt: string;
+  active: number;
+  supersededKey: string | null;
+};
+
 export function createRuleStore(port: SqlPort) {
   const fill = () => {
-    const active = Number(port.sql("SELECT COUNT(*) AS n FROM rules WHERE active = 1")[0]?.n ?? 0);
-    const total = Number(port.sql("SELECT COUNT(*) AS n FROM rules")[0]?.n ?? 0);
+    const active = port.sql<CountRow>("SELECT COUNT(*) AS n FROM rules WHERE active = 1")[0]?.n ?? 0;
+    const total = port.sql<CountRow>("SELECT COUNT(*) AS n FROM rules")[0]?.n ?? 0;
     return `${active} of ${total}`;
   };
 
-  const ruleLine = (row: Row) =>
-    `r#${row.id} · ${row.text} ${wordList(String(row.topics ?? ""))
-      .map((topic) => `#${topic}`)
-      .join(" ")}`;
+  const ruleLine = (row: RuleMatchRow) =>
+    `r#${row.id} · ${row.text} ${wordList(row.topics).map((topic) => `#${topic}`).join(" ")}`;
 
   const storedTopics = () =>
-    [...new Set(port.sql("SELECT DISTINCT topics FROM rules").flatMap((row) => wordList(String(row.topics ?? ""))))];
+    [...new Set(port.sql<StoredTopicsRow>("SELECT DISTINCT topics FROM rules").flatMap((row) => wordList(row.topics)))];
 
   function match(query: string): string[] {
-    const rows = port.sql(
+    const rows = port.sql<RuleMatchRow>(
       `SELECT rules.rowid AS id, rules.text AS text, rules.topics AS topics
         FROM rules_ft JOIN rules ON rules.rowid = rules_ft.rowid
         WHERE rules_ft MATCH ? AND rules.active = 1
@@ -67,14 +80,14 @@ export function createRuleStore(port: SqlPort) {
 
     const key = await port.digest([topics.join(" "), body]);
     return port.transaction(() => {
-      if (port.sql("SELECT rowid AS id FROM rules WHERE dkey = ?", [key])[0]) {
+      if (port.sql<IdRow>("SELECT rowid AS id FROM rules WHERE dkey = ?", [key])[0]) {
         return `stored · again, same call · ${fill()}`;
       }
 
-      const candidates = port.sql(
-        "SELECT rowid AS id, text AS text, topics AS topics FROM rules WHERE active = 1",
+      const candidates = port.sql<RuleCandidateRow>(
+        "SELECT rowid AS id, text AS text FROM rules WHERE active = 1",
       );
-      const retired = candidates.filter((row) => sameWords(String(row.text), body));
+      const retired = candidates.filter((row) => sameWords(row.text, body));
 
       const keyOfMine = crypto.randomUUID();
       for (const row of retired) {
@@ -99,16 +112,17 @@ export function createRuleStore(port: SqlPort) {
   function unlearn(ruleId: number, confirm: string): string {
     const wanted = flat(confirm);
     return port.transaction(() => {
-      const row = port.sql("SELECT rowid AS id, text AS text, active AS active FROM rules WHERE rowid = ?", [
-        ruleId,
-      ])[0];
+      const row = port.sql<RuleStateRow>(
+        "SELECT rowid AS id, text AS text, active AS active FROM rules WHERE rowid = ?",
+        [ruleId],
+      )[0];
       if (!row) {
         throw new Error(
           `nothing stored as instruction r#${ruleId}; brain_recall and brain_learn print the id of every live rule`,
         );
       }
-      if (Number(row.active) === 0) return `retired · ${fill()}`;
-      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
+      if (row.active === 0) return `retired · ${fill()}`;
+      if (wanted.length === 0 || !row.text.includes(wanted)) {
         throw new Error(
           `instruction r#${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
@@ -118,8 +132,8 @@ export function createRuleStore(port: SqlPort) {
     });
   }
 
-  function rules(): Row[] {
-    return port.sql(
+  function rules(): RuleExportRow[] {
+    return port.sql<RuleExportRow>(
       `SELECT rowid AS id, text AS text, topics AS topics, at AS storedAt,
         active AS active, superseded_key AS supersededKey
         FROM rules ORDER BY rowid`,

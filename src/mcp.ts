@@ -95,7 +95,12 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
       inputSchema: z.object({ items: z.array(noteItem(maxNote)).min(1).max(20) }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ items }) => brain.remember(items).then(spoken),
+    async ({ items }) =>
+      brain
+        .remember(
+          items.map((item) => ({ text: item.text, tags: item.tags ?? "", tier: item.tier ?? "note" })),
+        )
+        .then(spoken),
   );
 
   server.registerTool(
