@@ -164,17 +164,10 @@ export function brainServer(brain: BrainHandle) {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },
     async () =>
-      brain.export().then((reply: ExportReply) => {
-        const payload = {
-          notes: reply.notes,
-          instructions: reply.instructions,
-          counts: reply.counts,
-        };
-        return {
-          ...text(JSON.stringify(payload)),
-          structuredContent: payload,
-        };
-      }),
+      brain.export().then((payload: ExportReply) => ({
+        ...text(JSON.stringify(payload)),
+        structuredContent: payload,
+      })),
   );
 
   return server;
