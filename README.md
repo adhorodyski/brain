@@ -42,8 +42,9 @@ Tell Brain something and it lands as either a note or an instruction.
 
 Both kinds are found by searching, and both are uncapped. Nothing is injected at session start, and no tool
 result carries a rule your query did not match, so a Brain you never consult stays out of the conversation.
-You trade an always-present block for rules that arrive where they are relevant, and a new rule on the same
-topic retires the older one instead of competing with it.
+You trade an always-present block for rules that arrive where they are relevant. Writing the same rule again
+with new topics replaces it; two rules that merely share a topic both survive, and you retire one with
+`brain_unlearn`.
 
 One `brain_recall` answers a question with both kinds, each ranked on its own:
 

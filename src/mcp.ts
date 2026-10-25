@@ -127,7 +127,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_learn",
     {
       title: "Learn an instruction",
-      description: `Store a rule for how answers should be given or behaviour changed. Call it AS SOON AS the owner corrects you, before answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. Give it topics: the words a later search will use to find it, and put those words in the rule too, because a rule tagged writing is missed by "write the release notes". A newer rule sharing a topic retires the older one.`,
+      description: `Store a rule for how answers should be given or behaviour changed. Call it AS SOON AS the owner corrects you, before answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. Give it topics: the words a later search will use to find it, and put those words in the rule too, because a rule tagged writing is missed by "write the release notes". Storing the same rule again with new topics replaces it; a different rule sharing a topic is stored beside it, never silently retired.`,
       inputSchema: z.object({
         text: z.string().describe("The rule, in the owner's own terms, at most 200 characters"),
         topics: z

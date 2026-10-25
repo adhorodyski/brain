@@ -11,7 +11,7 @@ nothing else.
 | `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the recall assembly that puts facts and rules in one response |
 | `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that turns a reply into a result. The only place a tool is defined |
 | `src/store.ts` | All note SQL: budgets, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
-| `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by shared topic, tombstones, the matching query, and the authority paragraph |
+| `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by identical wording, tombstones, the matching query, and the authority paragraph |
 | `src/env.d.ts` | `Env` |
 
 ## Rules
@@ -61,6 +61,13 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - `rules.match` filters `active = 1` in SQL. Drop the predicate and a retired rule keeps matching searches,
   which is the failure `brain_forget` cannot have because `forget` deletes the row.
 
+- Supersede matches on **wording**, not topic: `sameWords` compares the two sorted word lists. A retired rule
+  matches nothing ever again, so anything that over-fires silently deletes behaviour. Firing on a shared topic
+  did exactly that with the owner's own rules: three distinct coding rules went in one after another and one
+  survived, and the write answered `stored · 1 of 3 · superseded r#2`, which reads as bookkeeping. Topics are
+  free text chosen by a model, so overlap is the normal case and cannot be the signal. Retire by hand with
+  `brain_unlearn`.
+
 - A rule needs topics, and `learn` refuses without them. Topics are the filing label; retrieval runs on the
   rule's own text, because `toFtsQuery` quotes exact tokens with no stemming, so a rule tagged `writing` is
   missed by "write the release notes". A rule that must fire on prose work has to say `writing`, `replies`,
@@ -108,6 +115,12 @@ under it. And no tool result mentions a rule it did not match: `brain_patch`, `b
 and `brain_export` return only their own line, and `brain_recall` of a fact-only query carries no authority
 paragraph. Grep the raw output for `Standing instructions` and for `outrank` rather than reading it, because
 a restored footer reads fine and costs 619 characters a call.
+
+Supersede gets its own three-write check, because the failure is silent and the answer text looks healthy.
+Store three rules with different wording that all carry the topic `coding`: all three must come back from a
+`coding` query. Then store the first rule's exact wording with different topics: it must answer
+`superseded r#1` and leave the other two live. A shared-topic rule leaves you with one live rule and no
+error, which is the bug and not a policy.
 
 Then ask `pi`, over ~15 runs, for a fact that
 was never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
