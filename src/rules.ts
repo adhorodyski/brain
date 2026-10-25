@@ -16,6 +16,8 @@ const NOT_BEHAVIOUR: [RegExp, string][] = [
   [/```|~~~/, "a code fence"],
 ];
 
+const sameWords = (left: string, right: string) => wordList(left).join(" ") === wordList(right).join(" ");
+
 export function createRuleStore(host: Host) {
   const fill = () => {
     const active = Number(host.sql("SELECT COUNT(*) AS n FROM rules WHERE active = 1")[0]?.n ?? 0);
@@ -72,9 +74,7 @@ export function createRuleStore(host: Host) {
       const candidates = host.sql(
         "SELECT rowid AS id, text AS text, topics AS topics FROM rules WHERE active = 1",
       );
-      const retired = candidates.filter((row) =>
-        wordList(String(row.topics ?? "")).some((topic) => topics.includes(topic)),
-      );
+      const retired = candidates.filter((row) => sameWords(String(row.text), body));
 
       const keyOfMine = crypto.randomUUID();
       for (const row of retired) {
