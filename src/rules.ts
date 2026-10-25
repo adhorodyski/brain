@@ -3,7 +3,7 @@ import {
   nearDuplicates,
   toFtsQuery,
   wordList,
-  type Host,
+  type SqlPort,
   type Row,
 } from "./store";
 
@@ -18,10 +18,10 @@ const NOT_BEHAVIOUR: [RegExp, string][] = [
 
 const sameWords = (left: string, right: string) => wordList(left).join(" ") === wordList(right).join(" ");
 
-export function createRuleStore(host: Host) {
+export function createRuleStore(port: SqlPort) {
   const fill = () => {
-    const active = Number(host.sql("SELECT COUNT(*) AS n FROM rules WHERE active = 1")[0]?.n ?? 0);
-    const total = Number(host.sql("SELECT COUNT(*) AS n FROM rules")[0]?.n ?? 0);
+    const active = Number(port.sql("SELECT COUNT(*) AS n FROM rules WHERE active = 1")[0]?.n ?? 0);
+    const total = Number(port.sql("SELECT COUNT(*) AS n FROM rules")[0]?.n ?? 0);
     return `${active} of ${total}`;
   };
 
@@ -31,10 +31,10 @@ export function createRuleStore(host: Host) {
       .join(" ")}`;
 
   const storedTopics = () =>
-    [...new Set(host.sql("SELECT DISTINCT topics FROM rules").flatMap((row) => wordList(String(row.topics ?? ""))))];
+    [...new Set(port.sql("SELECT DISTINCT topics FROM rules").flatMap((row) => wordList(String(row.topics ?? ""))))];
 
   function match(query: string): string[] {
-    const rows = host.sql(
+    const rows = port.sql(
       `SELECT rules.rowid AS id, rules.text AS text, rules.topics AS topics
         FROM rules_ft JOIN rules ON rules.rowid = rules_ft.rowid
         WHERE rules_ft MATCH ? AND rules.active = 1
@@ -65,25 +65,25 @@ export function createRuleStore(host: Host) {
       );
     }
 
-    const key = await host.digest([topics.join(" "), body]);
-    return host.transaction(() => {
-      if (host.sql("SELECT rowid AS id FROM rules WHERE dkey = ?", [key])[0]) {
+    const key = await port.digest([topics.join(" "), body]);
+    return port.transaction(() => {
+      if (port.sql("SELECT rowid AS id FROM rules WHERE dkey = ?", [key])[0]) {
         return `stored · again, same call · ${fill()}`;
       }
 
-      const candidates = host.sql(
+      const candidates = port.sql(
         "SELECT rowid AS id, text AS text, topics AS topics FROM rules WHERE active = 1",
       );
       const retired = candidates.filter((row) => sameWords(String(row.text), body));
 
       const keyOfMine = crypto.randomUUID();
       for (const row of retired) {
-        host.sql("UPDATE rules SET active = 0, superseded_key = ?, dkey = NULL WHERE rowid = ?", [
+        port.sql("UPDATE rules SET active = 0, superseded_key = ?, dkey = NULL WHERE rowid = ?", [
           keyOfMine,
           row.id,
         ]);
       }
-      host.sql(
+      port.sql(
         `INSERT INTO rules (key, text, topics, at, active, superseded_key, dkey)
           VALUES (?, ?, ?, ?, 1, NULL, ?)`,
         [keyOfMine, body, topics.join(" "), new Date().toISOString(), key],
@@ -98,8 +98,8 @@ export function createRuleStore(host: Host) {
 
   function unlearn(ruleId: number, confirm: string): string {
     const wanted = flat(confirm);
-    return host.transaction(() => {
-      const row = host.sql("SELECT rowid AS id, text AS text, active AS active FROM rules WHERE rowid = ?", [
+    return port.transaction(() => {
+      const row = port.sql("SELECT rowid AS id, text AS text, active AS active FROM rules WHERE rowid = ?", [
         ruleId,
       ])[0];
       if (!row) {
@@ -113,13 +113,13 @@ export function createRuleStore(host: Host) {
           `instruction r#${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
       }
-      host.sql("UPDATE rules SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
+      port.sql("UPDATE rules SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
       return `retired · ${fill()}`;
     });
   }
 
   function rules(): Row[] {
-    return host.sql(
+    return port.sql(
       `SELECT rowid AS id, text AS text, topics AS topics, at AS storedAt,
         active AS active, superseded_key AS supersededKey
         FROM rules ORDER BY rowid`,
