@@ -111,7 +111,7 @@ export function createInstructionStore(host: Host, limits: InstructLimits) {
 
       const keyOfMine = crypto.randomUUID();
       for (const row of retired) {
-        host.sql("UPDATE instructions SET active = 0, superseded_key = ? WHERE rowid = ?", [
+        host.sql("UPDATE instructions SET active = 0, dkey = NULL, superseded_key = ? WHERE rowid = ?", [
           keyOfMine,
           row.id,
         ]);

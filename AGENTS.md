@@ -56,6 +56,10 @@ Each of these has a plausible-looking edit that breaks it quietly.
   `brain_unlearn` needs an export to find its target — the pointer in the not-found error was never the cause,
   the hidden id was.
 
+- The supersede `UPDATE` clears `dkey` with `active = 0`, the way `brain_unlearn` does. Leave `dkey` populated
+  and re-learning a rule that supersede retired hits the dedupe check before the supersede loop: the answer is
+  `stored · again, same call` and the rule stays retired. That line there is the bug, not a healthy retry.
+
 ## Checks
 
 ```sh
