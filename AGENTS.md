@@ -8,10 +8,10 @@ nothing else.
 | File | Contents |
 |---|---|
 | `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, Cloudflare Access identity guard |
-| `src/brain.ts` | The Durable Object: schema on init, one method per tool, the recall assembly, and the instruction block built after each write |
-| `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that attaches the block to every result. The only place a tool is defined |
+| `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the recall assembly that puts facts and rules in one response |
+| `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that turns a reply into a result. The only place a tool is defined |
 | `src/store.ts` | All note SQL: budgets, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
-| `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by shared topic, tombstones, the matching query, and the block renderer |
+| `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by shared topic, tombstones, the matching query, and the authority paragraph |
 | `src/env.d.ts` | `Env` |
 
 ## Rules
@@ -45,8 +45,13 @@ Each of these has a plausible-looking edit that breaks it quietly.
   drop `aud` and dev refuses to boot; delete the block and dev 403s like a Worker with no Access rule.
 - `dkey` hashes the normalised write args, not the JSON-RPC id. Hosts number requests from 1 per session, so an
   id-keyed dedupe collides across clients and reports a fresh write as a duplicate.
-- The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
-  from before its own row existed.
+- Nothing is injected. There is no standing block, and no tool result carries rules the query did not earn.
+  The authority paragraph rides only under a non-empty `instructions` section, and the `brain_learn` nudge
+  lives there too. Re-adding a block to every result looks like a small robustness win and is what this
+  product deleted: 619 characters per call, dropped by compaction, and demonstrably ignored while present.
+
+- `fill()` is built **after** the insert. Build it before and `brain_learn` reports a count from before its
+  own row existed.
 
 - `recall` runs two SELECTs with their own limits and concatenates them. Do not UNION the tables into one
   ranked list. BM25 divides by document length at `b` 0.75 and the tags column carries 5x weight, so the
@@ -71,8 +76,8 @@ Each of these has a plausible-looking edit that breaks it quietly.
   miss, and printing the line there both claims something false about the archive and suppresses the one path
   that worked.
 
-- The `r#id` that `brain_recall` and `brain_learn` print is where a host gets an instruction id, and until PR
-  2 the instructions block is the other place. Remove both and `brain_unlearn` needs an export to find its
+- The `r#id` that `brain_recall` and `brain_learn` print is the only place a host gets an instruction id.
+  Remove it and `brain_unlearn` needs an export to find its
   target — the pointer in the not-found error was never the cause, the hidden id was. Notes print `#id` and
   rules print `r#id` so one number can never name a row in the wrong table.
 
@@ -94,10 +99,19 @@ Then against `wrangler dev`, with a real `pi` client for the tools and `curl` fo
 unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from this Worker; a query of `4417`
 ranks the garage note first; `"`, `((x`, a lone backslash, `"OR"` and a blank query never raise `fts5: syntax
 error`; a near-miss tag echoes the stored one, and so does a near-miss topic; the same write twice returns
-`again, same call` with one row; a retired rule stops matching searches but stays in `export`; an
-over-budget write throws and stores nothing. A query holding only a rule's own words returns that rule under
-`instructions`, which is what [adhorodyski/brain#31](https://github.com/adhorodyski/brain/issues/31) is for,
-and the check for it is the one to write down before the code. Then ask `pi`, over ~15 runs, for a fact that
+`again, same call` with one row; a retired rule stops matching searches but stays in `export`; a `core` write
+over budget throws and stores nothing.
+
+Two checks belong to the pull-only design and neither has a plausible-looking edit that keeps it passing.
+A query holding only a rule's own words returns that rule under `instructions` with the authority paragraph
+under it. And no tool result mentions a rule it did not match: `brain_patch`, `brain_forget`, `brain_remember`
+and `brain_export` return only their own line, and `brain_recall` of a fact-only query carries no authority
+paragraph. Grep the raw output for `Standing instructions` and for `outrank` rather than reading it, because
+a restored footer reads fine and costs 619 characters a call.
+
+Then ask `pi`, over ~15 runs, for a fact that
 was never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
-fifteen. Ask it to retire a rule by name and it takes the `r#id` from a recall. Cut the standing block before
-reading any recall output in these checks, or a footer line is mistaken for a search hit.
+fifteen. Ask it to retire a rule by name and it takes the `r#id` from a recall. Over the same ~15 runs, ask
+for work in each task class (tests, a pull request, prose) without naming Brain at all, and count how many
+sessions call `brain_recall` unprompted. That count is the whole delivery mechanism now: a class that rarely
+triggers is a description that has to name it, not a block to put back.

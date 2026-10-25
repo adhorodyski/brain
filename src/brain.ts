@@ -7,11 +7,10 @@ import {
   type Row,
   type SqlValue,
 } from "./store";
-import { createRuleStore } from "./rules";
+import { createRuleStore, AUTHORITY } from "./rules";
 
 export interface Reply {
   text: string;
-  standing: string;
   failed: boolean;
 }
 
@@ -26,7 +25,6 @@ type NoteRow = ReturnType<typeof noteRow>;
 type RuleRow = ReturnType<typeof ruleRow>;
 
 export interface ExportReply {
-  standing: string;
   notes: NoteRow[];
   instructions: RuleRow[];
   counts: Counts;
@@ -120,9 +118,7 @@ export class Brain extends DurableObject<Env> {
       coreTokens: numberFrom(env.CORE_TOKENS, 900),
       maxNote: numberFrom(env.MAX_NOTE, 300),
     });
-    this.rules = createRuleStore(host, {
-      instructTokens: numberFrom(env.INSTRUCT_TOKENS, 300),
-    });
+    this.rules = createRuleStore(host);
     this.ensureSchema();
   }
 
@@ -137,11 +133,10 @@ export class Brain extends DurableObject<Env> {
   }
 
   private async answer(build: () => string | Promise<string>): Promise<Reply> {
-    const block = () => this.rules.block(this.env.TIMEZONE ?? "UTC");
     try {
-      return { text: await build(), standing: block(), failed: false };
+      return { text: await build(), failed: false };
     } catch (error) {
-      return { text: error instanceof Error ? error.message : String(error), standing: block(), failed: true };
+      return { text: error instanceof Error ? error.message : String(error), failed: true };
     }
   }
 
@@ -152,7 +147,7 @@ export class Brain extends DurableObject<Env> {
       if (facts.length === 0 && matched.length === 0) return noMatchLine(query);
       const parts: string[] = [];
       if (facts.length > 0) parts.push(`${FACTS_HEADER}\n${facts.join("\n")}`);
-      if (matched.length > 0) parts.push(`${INSTRUCTIONS_HEADER}\n${matched.join("\n")}`);
+      if (matched.length > 0) parts.push(`${INSTRUCTIONS_HEADER}\n${matched.join("\n")}\n\n${AUTHORITY}`);
       return parts.join("\n\n");
     });
   }
@@ -183,7 +178,6 @@ export class Brain extends DurableObject<Env> {
     const core = notes.filter((row) => String(row.tier) === "core").length;
     const active = rules.filter((row) => Number(row.active) === 1).length;
     return {
-      standing: this.rules.block(this.env.TIMEZONE ?? "UTC"),
       notes: notes.map(noteRow),
       instructions: rules.map(ruleRow),
       counts: { notes: notes.length, core, activeInstructions: active, allInstructions: rules.length },
