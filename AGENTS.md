@@ -8,10 +8,10 @@ nothing else.
 | File | Contents |
 |---|---|
 | `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, Cloudflare Access identity guard |
-| `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the instruction block built after each write |
+| `src/brain.ts` | The Durable Object: schema on init, one method per tool, the recall assembly, and the instruction block built after each write |
 | `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that attaches the block to every result. The only place a tool is defined |
 | `src/store.ts` | All note SQL: budgets, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
-| `src/instruct.ts` | Instruction rows: the 200-character gate, supersede, tombstones, block renderer |
+| `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by shared topic, tombstones, the matching query, and the block renderer |
 | `src/env.d.ts` | `Env` |
 
 ## Rules
@@ -25,7 +25,10 @@ no web fetch, no model call, no transcript, no second user or per-row ownership,
 **Two runtime deps**, `@modelcontextprotocol/server` and `zod`, and no `nodejs_compat`. Nothing from pi.
 
 **Greenfield.** `SCHEMA` in `brain.ts` creates the final shape. No `migrate()`, `ALTER`, column guard, flag,
-legacy name or default value for a dropped column. If a change seems to need one, stop and ask.
+legacy name or default value for a dropped column. If a change seems to need one, stop and ask. Every
+statement in `SCHEMA` carries `IF NOT EXISTS`, which is what lets a deployed DO that already has `notes` gain
+`rules` and `rules_ft` without touching its rows. That is the one exception the rule allows, and it is the
+reason `ensureSchema` checks both table names rather than `notes` alone.
 
 ## Traps
 
@@ -45,16 +48,33 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - The instruction block is built **after** the write. Build it before and `brain_learn` reports the fill state
   from before its own row existed.
 
+- `recall` runs two SELECTs with their own limits and concatenates them. Do not UNION the tables into one
+  ranked list. BM25 divides by document length at `b` 0.75 and the tags column carries 5x weight, so the
+  90-character rules would outscore the 300-character facts and take slots from the garage note. Keep
+  `rules_ft` separate even though it holds the same two column shapes.
+
+- `rules.match` filters `active = 1` in SQL. Drop the predicate and a retired rule keeps matching searches,
+  which is the failure `brain_forget` cannot have because `forget` deletes the row.
+
+- A rule needs topics, and `learn` refuses without them. Topics are the filing label; retrieval runs on the
+  rule's own text, because `toFtsQuery` quotes exact tokens with no stemming, so a rule tagged `writing` is
+  missed by "write the release notes". A rule that must fire on prose work has to say `writing`, `replies`,
+  or `summaries` in its own text.
+
 - The empty-recall line is load-bearing prose. `nothing stored matching "x"` alone reads as a failed lookup,
   so the host calls `brain_export` for the whole archive — twice the payload, because `outputSchema` sends it
   in `content` and `structuredContent`. The line has to claim the miss survives **another query**: wording it
   about one question invites rephrasing, and a host that rephrases enough dumps anyway. Even worded this way
   about one run in fifteen still dumps. That is host behaviour, not wording still to be found — do not read a
   lone dump as a regression, and do not trim the sentence, which looks cosmetic and brings the dumps back.
+  `recall` prints it only when **both** indexes come back empty. Facts missing and a rule matching is not a
+  miss, and printing the line there both claims something false about the archive and suppresses the one path
+  that worked.
 
-- The `#id` in the instructions block is the only place a host gets an instruction id. Remove it and
-  `brain_unlearn` needs an export to find its target — the pointer in the not-found error was never the cause,
-  the hidden id was.
+- The `r#id` that `brain_recall` and `brain_learn` print is where a host gets an instruction id, and until PR
+  2 the instructions block is the other place. Remove both and `brain_unlearn` needs an export to find its
+  target — the pointer in the not-found error was never the cause, the hidden id was. Notes print `#id` and
+  rules print `r#id` so one number can never name a row in the wrong table.
 
 ## Checks
 
@@ -68,9 +88,12 @@ The dry-run bundles at 217 KiB gzipped. Tens more means a dependency crept in.
 Then against `wrangler dev`, with a real `pi` client for the tools and `curl` for the rest: with the
 `access.dev` block removed `/mcp` gives 403 `Access required` and not 500; against the deployed Worker, an
 unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from this Worker; a query of `4417`
-ranks the garage note first; `"`, `((x`, a
-lone backslash and a blank query never raise `fts5: syntax error`; a near-miss tag echoes the stored one; the
-same write twice returns `again, same call` with one row; a retired rule stops matching searches but stays in
-`export`; an over-budget write throws and stores nothing. Then ask `pi`, over ~15 runs, for a fact that was
-never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
-fifteen. Ask it to retire a rule by name and it takes the id from the instructions block.
+ranks the garage note first; `"`, `((x`, a lone backslash, `"OR"` and a blank query never raise `fts5: syntax
+error`; a near-miss tag echoes the stored one, and so does a near-miss topic; the same write twice returns
+`again, same call` with one row; a retired rule stops matching searches but stays in `export`; an
+over-budget write throws and stores nothing. A query holding only a rule's own words returns that rule under
+`instructions`, which is what [adhorodyski/brain#31](https://github.com/adhorodyski/brain/issues/31) is for,
+and the check for it is the one to write down before the code. Then ask `pi`, over ~15 runs, for a fact that
+was never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
+fifteen. Ask it to retire a rule by name and it takes the `r#id` from a recall. Cut the standing block before
+reading any recall output in these checks, or a footer line is mistaken for a search hit.

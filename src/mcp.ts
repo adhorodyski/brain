@@ -43,8 +43,7 @@ const exportShape = z.object({
     z.object({
       id: z.number(),
       text: z.string(),
-      scope: z.string(),
-      priority: z.number(),
+      topics: z.string(),
       storedAt: z.string(),
       active: z.boolean(),
       supersededKey: z.string().nullable(),
@@ -75,9 +74,9 @@ export function brainServer(brain: BrainHandle) {
     "brain_recall",
     {
       title: "Recall",
-      description: `Search the owner's notes and get back the matching lines, plus related rows that share their tags. Call it before answering anything about the owner, their plans, people, places, or codes. Reads nothing and writes nothing. An empty result is final: another query will not find it, so ask the owner. ${FILL}`,
+      description: `Search the owner's notes and get back the matching facts and the matching standing instructions, plus related rows that share their tags. Call it before answering anything about the owner, their plans, people, places, or codes, and before coding, testing, investigating, writing prose, or drafting a pull request. Reads nothing and writes nothing. An empty result is final: another query will not find it, so ask the owner. ${FILL}`,
       inputSchema: z.object({
-        query: z.string().describe("Words or a whole question; every word is OR-ed, tags included"),
+        query: z.string().describe("Words or a whole question; every word is OR-ed, note tags and instruction topics included"),
         limit: z.number().int().min(1).max(30).optional().describe("Maximum rows, default 8"),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
@@ -129,31 +128,27 @@ export function brainServer(brain: BrainHandle) {
     "brain_learn",
     {
       title: "Learn an instruction",
-      description: `Store a standing instruction: a rule about how answers should be given or behaviour changed, reachable through triggers such as next time, not like that, stop doing, always, never, I prefer, don't, should. Call it BEFORE answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. A newer rule on the same topic retires the older one. ${FILL}`,
+      description: `Store a standing instruction: a rule about how answers should be given or behaviour changed, reachable through triggers such as next time, not like that, stop doing, always, never, I prefer, don't, should. Call it BEFORE answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. A newer rule sharing a topic retires the older one. ${FILL}`,
       inputSchema: z.object({
         text: z.string().describe("The rule, in the owner's own terms, at most 200 characters"),
-        scope: z
-          .union([
-            z.literal("always"),
-            z.literal("briefing"),
-            z.literal("coding"),
-            z.literal("writing"),
-          ])
-          .optional()
-          .describe("When the rule applies; always is the default"),
+        topics: z
+          .string()
+          .describe(
+            "The words a search will use to find this rule, such as testing, prs, or prose. Topic words only, space or comma separated",
+          ),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
-    async ({ text: body, scope }) => brain.learn(body, scope ?? "always").then(spoken),
+    async ({ text: body, topics }) => brain.learn(body, topics).then(spoken),
   );
 
   server.registerTool(
     "brain_unlearn",
     {
       title: "Retire an instruction",
-      description: `Retire one standing instruction. Takes the #number the standing instructions block prints beside that rule, plus confirm, a fragment of its own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history. ${FILL}`,
+      description: `Retire one standing instruction. Takes the r#number brain_recall or brain_learn prints beside that rule, plus confirm, a fragment of its own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history. ${FILL}`,
       inputSchema: z.object({
-        id: z.number().int().min(1).describe("The instruction id"),
+        id: z.number().int().min(1).describe("The instruction id, without the r prefix"),
         confirm: z.string().describe("Words copied from that rule's text"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true },
@@ -191,7 +186,7 @@ export interface BrainHandle {
   remember(items: NoteInput[]): Promise<Reply>;
   patch(id: number, confirm: string, text: string): Promise<Reply>;
   forget(id: number, confirm: string): Promise<Reply>;
-  learn(text: string, scope: string): Promise<Reply>;
+  learn(text: string, topics: string): Promise<Reply>;
   unlearn(id: number, confirm: string): Promise<Reply>;
   export(): Promise<ExportReply>;
 }

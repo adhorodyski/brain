@@ -1,12 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
-import { createInstructionStore } from "./instruct";
 import {
   createNoteStore,
+  noMatchLine,
   type Host,
   type NoteInput,
   type Row,
   type SqlValue,
 } from "./store";
+import { createRuleStore } from "./rules";
 
 export interface Reply {
   text: string;
@@ -32,7 +33,7 @@ export interface ExportReply {
 }
 
 const SCHEMA = [
-  `CREATE TABLE notes (
+  `CREATE TABLE IF NOT EXISTS notes (
     key    TEXT PRIMARY KEY,
     text   TEXT NOT NULL,
     tags   TEXT NOT NULL DEFAULT '',
@@ -40,29 +41,42 @@ const SCHEMA = [
     at     TEXT NOT NULL,
     dkey   TEXT UNIQUE
   )`,
-  `CREATE VIRTUAL TABLE notes_ft USING fts5(text, tags, content='notes', content_rowid='rowid')`,
-  `CREATE INDEX notes_tier ON notes(tier)`,
-  `CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN
+  `CREATE VIRTUAL TABLE IF NOT EXISTS notes_ft USING fts5(text, tags, content='notes', content_rowid='rowid')`,
+  `CREATE INDEX IF NOT EXISTS notes_tier ON notes(tier)`,
+  `CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
     INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
   END`,
-  `CREATE TRIGGER notes_au AFTER UPDATE ON notes BEGIN
+  `CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
     INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
     INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
   END`,
-  `CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
+  `CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
     INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
   END`,
-  `CREATE TABLE instructions (
+  `CREATE TABLE IF NOT EXISTS rules (
     key            TEXT PRIMARY KEY,
     text           TEXT NOT NULL,
-    when_scope     TEXT NOT NULL DEFAULT 'always',
-    priority       INTEGER NOT NULL DEFAULT 0,
+    topics         TEXT NOT NULL,
     at             TEXT NOT NULL,
     active         INTEGER NOT NULL DEFAULT 1,
     superseded_key TEXT,
     dkey           TEXT UNIQUE
   )`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS rules_ft USING fts5(text, topics, content='rules', content_rowid='rowid')`,
+  `CREATE TRIGGER IF NOT EXISTS rules_ai AFTER INSERT ON rules BEGIN
+    INSERT INTO rules_ft(rowid, text, topics) VALUES (new.rowid, new.text, new.topics);
+  END`,
+  `CREATE TRIGGER IF NOT EXISTS rules_au AFTER UPDATE ON rules BEGIN
+    INSERT INTO rules_ft(rules_ft, rowid, text, topics) VALUES ('delete', old.rowid, old.text, old.topics);
+    INSERT INTO rules_ft(rowid, text, topics) VALUES (new.rowid, new.text, new.topics);
+  END`,
+  `CREATE TRIGGER IF NOT EXISTS rules_ad AFTER DELETE ON rules BEGIN
+    INSERT INTO rules_ft(rules_ft, rowid, text, topics) VALUES ('delete', old.rowid, old.text, old.topics);
+  END`,
 ];
+
+const FACTS_HEADER = "facts";
+const INSTRUCTIONS_HEADER = "instructions";
 
 const numberFrom = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -80,8 +94,7 @@ const noteRow = (row: Row) => ({
 const ruleRow = (row: Row) => ({
   id: Number(row.id),
   text: String(row.text),
-  scope: String(row.scope),
-  priority: Number(row.priority),
+  topics: String(row.topics),
   storedAt: String(row.storedAt),
   active: Number(row.active) === 1,
   supersededKey: row.supersededKey === null ? null : String(row.supersededKey),
@@ -89,7 +102,7 @@ const ruleRow = (row: Row) => ({
 
 export class Brain extends DurableObject<Env> {
   private notes;
-  private instructions;
+  private rules;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -107,20 +120,24 @@ export class Brain extends DurableObject<Env> {
       coreTokens: numberFrom(env.CORE_TOKENS, 900),
       maxNote: numberFrom(env.MAX_NOTE, 300),
     });
-    this.instructions = createInstructionStore(host, {
+    this.rules = createRuleStore(host, {
       instructTokens: numberFrom(env.INSTRUCT_TOKENS, 300),
     });
     this.ensureSchema();
   }
 
   private ensureSchema(): void {
-    const built = [...this.ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE name = 'notes'")];
-    if (built.length > 0) return;
+    const built = new Set(
+      [...this.ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE name IN ('notes', 'rules')")].map(
+        (row) => String(row.name),
+      ),
+    );
+    if (built.has("notes") && built.has("rules")) return;
     for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
   }
 
   private async answer(build: () => string | Promise<string>): Promise<Reply> {
-    const block = () => this.instructions.block(this.env.TIMEZONE ?? "UTC");
+    const block = () => this.rules.block(this.env.TIMEZONE ?? "UTC");
     try {
       return { text: await build(), standing: block(), failed: false };
     } catch (error) {
@@ -129,7 +146,15 @@ export class Brain extends DurableObject<Env> {
   }
 
   async recall(query: string, limit: number): Promise<Reply> {
-    return this.answer(() => this.notes.recall(query, limit));
+    return this.answer(() => {
+      const facts = this.notes.recall(query, limit);
+      const matched = this.rules.match(query);
+      if (facts.length === 0 && matched.length === 0) return noMatchLine(query);
+      const parts: string[] = [];
+      if (facts.length > 0) parts.push(`${FACTS_HEADER}\n${facts.join("\n")}`);
+      if (matched.length > 0) parts.push(`${INSTRUCTIONS_HEADER}\n${matched.join("\n")}`);
+      return parts.join("\n\n");
+    });
   }
 
   async remember(items: NoteInput[]): Promise<Reply> {
@@ -144,24 +169,24 @@ export class Brain extends DurableObject<Env> {
     return this.answer(() => this.notes.forget(id, confirm));
   }
 
-  async learn(text: string, scope: string): Promise<Reply> {
-    return this.answer(() => this.instructions.learn(text, scope));
+  async learn(text: string, topics: string): Promise<Reply> {
+    return this.answer(() => this.rules.learn(text, topics));
   }
 
   async unlearn(id: number, confirm: string): Promise<Reply> {
-    return this.answer(() => this.instructions.unlearn(id, confirm));
+    return this.answer(() => this.rules.unlearn(id, confirm));
   }
 
   async export(): Promise<ExportReply> {
     const notes = this.notes.notes();
-    const instructions = this.instructions.instructions();
+    const rules = this.rules.rules();
     const core = notes.filter((row) => String(row.tier) === "core").length;
-    const active = instructions.filter((row) => Number(row.active) === 1).length;
+    const active = rules.filter((row) => Number(row.active) === 1).length;
     return {
-      standing: this.instructions.block(this.env.TIMEZONE ?? "UTC"),
+      standing: this.rules.block(this.env.TIMEZONE ?? "UTC"),
       notes: notes.map(noteRow),
-      instructions: instructions.map(ruleRow),
-      counts: { notes: notes.length, core, activeInstructions: active, allInstructions: instructions.length },
+      instructions: rules.map(ruleRow),
+      counts: { notes: notes.length, core, activeInstructions: active, allInstructions: rules.length },
     };
   }
 }
