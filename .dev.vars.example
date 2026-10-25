@@ -1,5 +1,3 @@
 BRAIN_HOSTNAME=brain.your-subdomain.workers.dev
 CORE_TOKENS=900
 MAX_NOTE=300
-INSTRUCT_TOKENS=300
-TIMEZONE=Australia/Brisbane

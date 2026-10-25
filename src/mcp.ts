@@ -3,17 +3,16 @@ import { z } from "zod";
 import type { ExportReply, Reply } from "./brain";
 import type { NoteInput } from "./store";
 
-const INSTRUCTIONS = `The owner's memory and preferences. Consult it before answering anything about them, and store anything durable before you answer.
+const INSTRUCTIONS = `Call brain_recall before coding, testing, investigating, writing prose, drafting a pull request, or answering anything about the owner: it returns the owner's facts and the rules they set for that task.
 
 Two tables, and the difference is the test: a sentence that can be FALSE is a fact, so store it with
 brain_remember; a sentence that can only be OBEYED is an instruction, so store it with brain_learn. If
 removing it would change how the next answer is worded, it is an instruction. If removing it would change
 which facts the answer cites, it is a note.
 
-brain_recall answers every question about the owner, and every response ends with the owner's standing
-instructions. Read them and follow them; they outrank your defaults.`;
-
-const FILL = "Every response ends with the owner's standing instructions; follow them over your own defaults.";
+brain_recall answers a question with both kinds, and its instructions section outranks your defaults. Rules
+are found by relevance to the query and nothing else: nothing is injected at session start, so a Brain you
+do not consult is a Brain that stays silent. Store a correction with brain_learn as soon as you get one.`;
 
 const noteItem = z.object({
   text: z.string().describe("One self-contained fact, at most 300 characters, flattened to a single line"),
@@ -60,7 +59,7 @@ const exportShape = z.object({
 const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
 const spoken = (reply: Reply): CallToolResult => ({
-  ...text(`${reply.text}\n\n${reply.standing}`),
+  ...text(reply.text),
   ...(reply.failed ? { isError: true } : {}),
 });
 
@@ -74,7 +73,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_recall",
     {
       title: "Recall",
-      description: `Search the owner's notes and get back the matching facts and the matching standing instructions, plus related rows that share their tags. Call it before answering anything about the owner, their plans, people, places, or codes, and before coding, testing, investigating, writing prose, or drafting a pull request. Reads nothing and writes nothing. An empty result is final: another query will not find it, so ask the owner. ${FILL}`,
+      description: `Search the owner's memory and get back the matching facts and the matching rules, plus related notes that share their tags. Call it before coding, testing, investigating, writing prose, or drafting a pull request, and before answering anything about the owner, their plans, people, places, or codes. Put the task in the query, not just a name: "write tests for the parser" finds the testing rules, "parser" may not. Reads nothing and writes nothing. An empty result is final: another query will not find it, so ask the owner.`,
       inputSchema: z.object({
         query: z.string().describe("Words or a whole question; every word is OR-ed, note tags and instruction topics included"),
         limit: z.number().int().min(1).max(30).optional().describe("Maximum rows, default 8"),
@@ -88,7 +87,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_remember",
     {
       title: "Remember",
-      description: `Store facts: anything that could be true or false, such as codes, addresses, decisions, dates, and who people are. One fact per item, self-contained enough to read in a year. Use brain_learn instead for a rule about how to behave. A repeated write with identical text lands once. ${FILL}`,
+      description: `Store facts: anything that could be true or false, such as codes, addresses, decisions, dates, and who people are. One fact per item, self-contained enough to read in a year. Use brain_learn instead for a rule about how to behave. A repeated write with identical text lands once.`,
       inputSchema: z.object({ items: z.array(noteItem).min(1).max(20) }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -99,7 +98,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_patch",
     {
       title: "Patch a note",
-      description: `Rewrite one stored note in place. Takes the #number brain_recall printed and confirm, a fragment taken verbatim from that note's own text; the two must agree or nothing changes. Prefer this over brain_forget plus brain_remember when a fact changed. ${FILL}`,
+      description: `Rewrite one stored note in place. Takes the #number brain_recall printed and confirm, a fragment taken verbatim from that note's own text; the two must agree or nothing changes. Prefer this over brain_forget plus brain_remember when a fact changed.`,
       inputSchema: z.object({
         id: z.number().int().min(1).describe("The note number from a recall line"),
         confirm: z.string().describe("Words copied from that note's current text"),
@@ -114,7 +113,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_forget",
     {
       title: "Forget a note",
-      description: `Delete one stored note permanently. Takes the note number and confirm, a fragment of that note's own text; the two must agree or nothing is deleted. Ask the owner first. ${FILL}`,
+      description: `Delete one stored note permanently. Takes the note number and confirm, a fragment of that note's own text; the two must agree or nothing is deleted. Ask the owner first.`,
       inputSchema: z.object({
         id: z.number().int().min(1).describe("The note number from a recall line"),
         confirm: z.string().describe("Words copied from that note's text"),
@@ -128,7 +127,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_learn",
     {
       title: "Learn an instruction",
-      description: `Store a standing instruction: a rule about how answers should be given or behaviour changed, reachable through triggers such as next time, not like that, stop doing, always, never, I prefer, don't, should. Call it BEFORE answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. A newer rule sharing a topic retires the older one. ${FILL}`,
+      description: `Store a rule for how answers should be given or behaviour changed. Call it AS SOON AS the owner corrects you, before answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. Give it topics: the words a later search will use to find it, and put those words in the rule too, because a rule tagged writing is missed by "write the release notes". A newer rule sharing a topic retires the older one.`,
       inputSchema: z.object({
         text: z.string().describe("The rule, in the owner's own terms, at most 200 characters"),
         topics: z
@@ -146,7 +145,7 @@ export function brainServer(brain: BrainHandle) {
     "brain_unlearn",
     {
       title: "Retire an instruction",
-      description: `Retire one standing instruction. Takes the r#number brain_recall or brain_learn prints beside that rule, plus confirm, a fragment of its own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history. ${FILL}`,
+      description: `Retire one rule. Takes the r#number brain_recall or brain_learn prints beside that rule, plus confirm, a fragment of its own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history.`,
       inputSchema: z.object({
         id: z.number().int().min(1).describe("The instruction id, without the r prefix"),
         confirm: z.string().describe("Words copied from that rule's text"),
@@ -160,22 +159,15 @@ export function brainServer(brain: BrainHandle) {
     "brain_export",
     {
       title: "Export the brain",
-      description: `Every note and every instruction, including retired ones, as JSON, with counts. For backups and audits, including retired rules. Never after brain_recall finds nothing: another query will not find it either, and this dumps every row into the conversation. ${FILL}`,
+      description: `Every note and every instruction, including retired ones, as JSON, with counts. For backups and audits. Never after brain_recall finds nothing: another query will not find it either, and this dumps every row into the conversation.`,
       outputSchema: exportShape,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },
     async () =>
-      brain.export().then((reply: ExportReply) => {
-        const payload = {
-          notes: reply.notes,
-          instructions: reply.instructions,
-          counts: reply.counts,
-        };
-        return {
-          ...text(`${JSON.stringify(payload)}\n\n${reply.standing}`),
-          structuredContent: payload,
-        };
-      }),
+      brain.export().then((payload: ExportReply) => ({
+        ...text(JSON.stringify(payload)),
+        structuredContent: payload,
+      })),
   );
 
   return server;
