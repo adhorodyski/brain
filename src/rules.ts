@@ -3,7 +3,6 @@ import {
   flat,
   nearDuplicates,
   percent,
-  storedWords,
   toFtsQuery,
   wordList,
   type Host,
@@ -40,15 +39,16 @@ export function createRuleStore(host: Host, limits: RuleLimits) {
   const fill = () =>
     `${count("WHERE active = 1")} of ${count("")} · ${usedChars()}/${limitChars()} (${percent(usedChars(), limitChars())}%)`;
 
-  const renderTopics = (stored: string) =>
-    wordList(stored)
+  const ruleLine = (row: Row) => {
+    const topics = wordList(String(row.topics ?? ""))
       .map((topic) => `#${topic}`)
       .join(" ");
-
-  const ruleLine = (row: Row) => {
-    const topics = renderTopics(String(row.topics ?? ""));
-    return topics ? `r#${row.id} · ${flat(String(row.text))} ${topics}` : `r#${row.id} · ${flat(String(row.text))}`;
+    const body = `r#${row.id} · ${flat(String(row.text))}`;
+    return topics.length > 0 ? `${body} ${topics}` : body;
   };
+
+  const storedTopics = () =>
+    [...new Set(host.sql("SELECT DISTINCT topics FROM rules").flatMap((row) => wordList(String(row.topics ?? ""))))];
 
   function block(timezone: string): string {
     const rules = host.sql(
@@ -103,9 +103,9 @@ export function createRuleStore(host: Host, limits: RuleLimits) {
       const retired = candidates.filter((row) =>
         wordList(String(row.topics ?? "")).some((topic) => topics.includes(topic)),
       );
-      const freed = retired.reduce((sum, row) => sum + String(row.text).length, 0);
+      const retiredChars = retired.reduce((sum, row) => sum + String(row.text).length, 0);
       const limit = limitChars();
-      const projected = usedChars() + body.length - freed;
+      const projected = usedChars() + body.length - retiredChars;
       if (projected > limit) {
         throw new Error(
           `the instruction budget is ${limit} characters with ${usedChars()} of them stored, and this rule goes ${projected - limit} over. Retire a rule with brain_unlearn or shorten this one; nothing was retired and nothing was stored`,
@@ -124,11 +124,11 @@ export function createRuleStore(host: Host, limits: RuleLimits) {
           VALUES (?, ?, ?, ?, 1, NULL, ?)`,
         [keyOfMine, body, topics.join(" "), new Date().toISOString(), key],
       );
-      const echo = nearDuplicates(storedWords(host, "rules", "topics"), topics)
+      const echo = nearDuplicates(storedTopics(), topics)
         .filter((topic) => !topics.includes(topic))
         .map((topic) => `existing topic: "${topic}"`);
-      const notes = retired.map((row) => `superseded r#${row.id}`);
-      return [`stored · ${fill()}`, ...notes, ...echo].join(" · ");
+      const superseded = retired.map((row) => `superseded r#${row.id}`);
+      return [`stored · ${fill()}`, ...superseded, ...echo].join(" · ");
     });
   }
 

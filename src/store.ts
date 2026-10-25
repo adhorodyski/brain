@@ -37,8 +37,6 @@ export function wordList(raw: string | undefined): string[] {
   return [...new Set(flat(raw ?? "").toLowerCase().split(TAG_GAP).filter(Boolean))].sort();
 }
 
-const parseTags = wordList;
-
 const renderTags = (stored: string) => wordList(stored).map((tag) => `#${tag}`).join(" ");
 
 const ftsWord = (word: string) => {
@@ -78,20 +76,10 @@ function withinGap(a: string, b: string, limit: number): boolean {
 
 export function nearDuplicates(stored: string[], wanted: string[]): string[] {
   if (wanted.length === 0) return [];
-  const known = [...new Set(stored)];
   return wanted
-    .map((tag) => known.find((candidate) => candidate !== tag && withinGap(tag, candidate, TAG_NEAR)))
+    .map((tag) => stored.find((candidate) => candidate !== tag && withinGap(tag, candidate, TAG_NEAR)))
     .filter((match): match is string => match !== undefined);
 }
-
-export const storedWords = (host: Host, table: string, column: string): string[] =>
-  [
-    ...new Set(
-      host
-        .sql(`SELECT DISTINCT ${column} AS words FROM ${table}`)
-        .flatMap((row) => parseTags(String(row.words ?? ""))),
-    ),
-  ];
 
 const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS storedAt,
   notes.text AS text, notes.tags AS tags
@@ -130,6 +118,9 @@ export function createNoteStore(host: Host, limits: Limits) {
   const coreFill = (used: number) =>
     `core ${used}/${coreLimit()} (${percent(used, coreLimit())}%)`;
 
+  const storedTags = () =>
+    [...new Set(host.sql("SELECT DISTINCT tags FROM notes").flatMap((row) => wordList(String(row.tags ?? ""))))];
+
   const coreRoom = (add: number, replace: number) => {
     const limit = coreLimit();
     const used = coreChars() - replace + add;
@@ -145,7 +136,7 @@ export function createNoteStore(host: Host, limits: Limits) {
     host.sql(INSERT_NOTE, [
       crypto.randomUUID(),
       text,
-      parseTags(note.tags).join(" "),
+      wordList(note.tags).join(" "),
       note.tier ?? "note",
       at,
       key,
@@ -158,7 +149,7 @@ export function createNoteStore(host: Host, limits: Limits) {
     if (hits.length === 0) return [];
 
     const lines = hits.map(noteLine);
-    const tags = parseTags(String(hits[0].tags ?? ""));
+    const tags = wordList(String(hits[0].tags ?? ""));
     if (hits.length > 3 || tags.length === 0) return lines;
 
     const seen = hits.map((row) => Number(row.id));
@@ -174,7 +165,7 @@ export function createNoteStore(host: Host, limits: Limits) {
     const notes = items.map((item) => {
       const text = flat(item.text);
       fitsNote(text, limits.maxNote);
-      return { item, text, tags: parseTags(item.tags), tier: item.tier ?? "note" };
+      return { item, text, tags: wordList(item.tags), tier: item.tier ?? "note" };
     });
     const keys = await Promise.all(
       notes.map((note) => host.digest([note.tier, note.text, note.tags.join(" ")])),
@@ -189,9 +180,7 @@ export function createNoteStore(host: Host, limits: Limits) {
           lines.push(`stored #${dupe.id} (again, same call)`);
           continue;
         }
-        const echo = nearDuplicates(storedWords(host, "notes", "tags"), note.tags).map(
-          (tag) => `existing tag: "${tag}"`,
-        );
+        const echo = nearDuplicates(storedTags(), note.tags).map((tag) => `existing tag: "${tag}"`);
         const used = note.tier === "core" ? coreRoom(note.text.length, 0) : 0;
         const id = insertNote(note.item, note.text, keys[index], at);
         const tail = [
