@@ -1,6 +1,7 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { ExportReply, Reply } from "./brain";
+import { MAX_RULE } from "./rules";
 import type { NoteInput } from "./store";
 
 const INSTRUCTIONS = `Call brain_recall before coding, testing, investigating, writing prose, drafting a pull request, or answering anything about the owner: it returns the owner's facts and the rules they set for that task.
@@ -14,19 +15,22 @@ brain_recall answers a question with both kinds, and its instructions section ou
 are found by relevance to the query and nothing else: nothing is injected at session start, so a Brain you
 do not consult is a Brain that stays silent. Store a correction with brain_learn as soon as you get one.`;
 
-const noteItem = z.object({
-  text: z.string().describe("One self-contained fact, at most 300 characters, flattened to a single line"),
-  tags: z
-    .string()
-    .optional()
-    .describe("Topic words only, space or comma separated. No dates and no names of people."),
-  tier: z
-    .union([z.literal("note"), z.literal("core")])
-    .optional()
-    .describe(
-      "core is a small budgeted set that costs tokens on every future request; note is uncapped and reachable only by searching. Default note.",
-    ),
-});
+const noteItem = (maxNote: number) =>
+  z.object({
+    text: z
+      .string()
+      .describe(`One self-contained fact, at most ${maxNote} characters, flattened to a single line`),
+    tags: z
+      .string()
+      .optional()
+      .describe("Topic words only, space or comma separated. No dates and no names of people."),
+    tier: z
+      .union([z.literal("note"), z.literal("core")])
+      .optional()
+      .describe(
+        "core is a small budgeted set that costs tokens on every future request; note is uncapped and reachable only by searching. Default note.",
+      ),
+  });
 
 const exportShape = z.object({
   notes: z.array(
@@ -63,7 +67,7 @@ const spoken = (reply: Reply): CallToolResult => ({
   ...(reply.failed ? { isError: true } : {}),
 });
 
-export function brainServer(brain: BrainHandle) {
+export function brainServer(brain: BrainHandle, maxNote: number) {
   const server = new McpServer(
     { name: "brain", version: "0.1.0" },
     { instructions: INSTRUCTIONS },
@@ -88,7 +92,7 @@ export function brainServer(brain: BrainHandle) {
     {
       title: "Remember",
       description: `Store facts: anything that could be true or false, such as codes, addresses, decisions, dates, and who people are. One fact per item, self-contained enough to read in a year. Use brain_learn instead for a rule about how to behave. A repeated write with identical text lands once.`,
-      inputSchema: z.object({ items: z.array(noteItem).min(1).max(20) }),
+      inputSchema: z.object({ items: z.array(noteItem(maxNote)).min(1).max(20) }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ items }) => brain.remember(items).then(spoken),
@@ -102,7 +106,7 @@ export function brainServer(brain: BrainHandle) {
       inputSchema: z.object({
         id: z.number().int().min(1).describe("The note number from a recall line"),
         confirm: z.string().describe("Words copied from that note's current text"),
-        text: z.string().describe("The whole new note, at most 300 characters"),
+        text: z.string().describe(`The whole new note, at most ${maxNote} characters`),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -127,9 +131,9 @@ export function brainServer(brain: BrainHandle) {
     "brain_learn",
     {
       title: "Learn an instruction",
-      description: `Store a rule for how answers should be given or behaviour changed. Call it AS SOON AS the owner corrects you, before answering, because after answering the shape of the reply is already fixed. One rule per call, at most 200 characters, no links, emails or code. Give it topics: the words a later search will use to find it, and put those words in the rule too, because a rule tagged writing is missed by "write the release notes". Storing the same rule again with new topics replaces it; a different rule sharing a topic is stored beside it, never silently retired.`,
+      description: `Store a rule for how answers should be given or behaviour changed. Call it AS SOON AS the owner corrects you, before answering, because after answering the shape of the reply is already fixed. One rule per call, at most ${MAX_RULE} characters, no links, emails or code. Give it topics: the words a later search will use to find it, and put those words in the rule too, because a rule tagged writing is missed by "write the release notes". Storing the same rule again with new topics replaces it; a different rule sharing a topic is stored beside it, never silently retired.`,
       inputSchema: z.object({
-        text: z.string().describe("The rule, in the owner's own terms, at most 200 characters"),
+        text: z.string().describe(`The rule, in the owner's own terms, at most ${MAX_RULE} characters`),
         topics: z
           .string()
           .describe(

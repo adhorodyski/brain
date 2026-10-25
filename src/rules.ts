@@ -7,7 +7,7 @@ import {
   type Row,
 } from "./store";
 
-const MAX_RULE = 200;
+export const MAX_RULE = 200;
 const MATCH_LIMIT = 3;
 
 const NOT_BEHAVIOUR: [RegExp, string][] = [
