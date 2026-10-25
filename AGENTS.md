@@ -76,6 +76,10 @@ Each of these has a plausible-looking edit that breaks it quietly.
   target — the pointer in the not-found error was never the cause, the hidden id was. Notes print `#id` and
   rules print `r#id` so one number can never name a row in the wrong table.
 
+- The supersede `UPDATE` clears `dkey` with `active = 0`, the way `brain_unlearn` does. Leave `dkey` populated
+  and re-learning a rule that supersede retired hits the dedupe check before the supersede loop: the answer is
+  `stored · again, same call` and the rule stays retired. That line there is the bug, not a healthy retry.
+
 ## Checks
 
 ```sh
