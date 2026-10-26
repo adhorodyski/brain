@@ -69,7 +69,7 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
     "brain_recall",
     {
       title: "Recall",
-      description: `Search the owner's memory and get back the matching facts and the matching rules, plus related notes that share their tags. Call it before coding, testing, investigating, writing prose, or drafting a pull request, and before answering anything about the owner, their plans, people, places, or codes. Put the task in the query, not just a name: "write tests for the parser" finds the testing rules, "parser" may not. Reads nothing and writes nothing. An empty result is final: another query will not find it, so ask the owner.`,
+      description: `Search the owner's memory and get back the matching facts and the matching rules. Call it before coding, testing, investigating, writing prose, or drafting a pull request, and before answering anything about the owner, their plans, people, places, or codes. Put the task in the query, not just a name: "write tests for the parser" finds the testing rules, "parser" may not. Reads nothing and writes nothing. An empty result is final: another query will not find it, so ask the owner.`,
       inputSchema: z.object({
         query: z.string().describe("Words or a whole question; every word is OR-ed, note tags and instruction topics included"),
         limit: z.number().int().min(1).max(30).optional().describe("Maximum rows, default 8"),

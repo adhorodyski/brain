@@ -91,12 +91,6 @@ export function nearDuplicates(stored: string[], wanted: string[]): string[] {
   return wanted.map((tag) => nearestMatch(tag, stored)).filter((match): match is string => match !== undefined);
 }
 
-const NOTE_SELECT = `SELECT notes.id AS id, notes.at AS storedAt,
-  notes.text AS text, notes.tags AS tags
-  FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
-  WHERE notes_ft MATCH ?`;
-const NOTE_RANK = " ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?";
-
 export const noMatchLine = (query: string) =>
   `nothing stored matching "${flat(query).slice(0, 120)}" — the archive holds nothing on this and another query will not find it, so ask the owner or say you do not know`;
 
@@ -128,21 +122,15 @@ export function createNoteStore(port: SqlPort, maxNote: number) {
   };
 
   function recall(query: string, limit: number): string[] {
-    const hits = port.sql<NoteHitRow>(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
-    const [lead] = hits;
-    if (!lead) return [];
-
-    const lines = hits.map(noteLine);
-    const tags = wordList(lead.tags);
-    if (hits.length > 3 || tags.length === 0) return lines;
-
-    const seen = hits.map((row) => row.id);
-    const neighbours = port.sql<NoteHitRow>(
-      `${NOTE_SELECT} AND notes.id NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
-      [toFtsQuery(tags.join(" ")), ...seen, 3],
+    const hits = port.sql<NoteHitRow>(
+      `SELECT notes.id AS id, notes.at AS storedAt,
+        notes.text AS text, notes.tags AS tags
+        FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
+        WHERE notes_ft MATCH ?
+        ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?`,
+      [toFtsQuery(query), limit],
     );
-    if (neighbours.length === 0) return lines;
-    return [...lines, "## Related", ...neighbours.map(noteLine)];
+    return hits.map(noteLine);
   }
 
   async function remember(items: NoteInput[]): Promise<string> {

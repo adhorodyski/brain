@@ -102,7 +102,7 @@ policy — no redeploy, nothing to rotate.
 
 | Tool | Args | Returns |
 |---|---|---|
-| `brain_recall` | `query`, `limit?` | A `facts` block of ranked `#id · stored <date> · text #tags` with `## Related` tag neighbours, then an `instructions` block of matching rules with the authority paragraph under them |
+| `brain_recall` | `query`, `limit?` | A `facts` block of ranked `#id · stored <date> · text #tags`, then an `instructions` block of matching rules with the authority paragraph under them |
 | `brain_remember` | `items[] { text, tags?: string of topic words }` | `stored #7`, or `stored · again, same call` for a repeat |
 | `brain_patch` | `id`, `confirm: string` copied from that note, `text` | `patched #7` |
 | `brain_forget` | `id`, `confirm: string` copied from that note | `forgot #7` |
