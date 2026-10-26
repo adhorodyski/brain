@@ -50,7 +50,7 @@ When you are ready for every device to see it, [deploy the Worker](#run-it) and 
 **Friday, in pi.** You tell it the code once.
 
 ```
-you: the garage code is 4417
+> the garage code is 4417
   → brain_remember  text:"Garage door code is 4417"  tags:"home code"
       stored #1 · existing tag: "codes"
 ```
@@ -58,7 +58,7 @@ you: the garage code is 4417
 **Friday, in Codex.** You correct how it opens replies. It files the correction without being asked.
 
 ```
-you: stop opening replies with "Sure!"
+> stop opening replies with "Sure!"
   → brain_learn  text:"Never open a reply with 'Sure!'"  tags:"replies"
       stored · 2 of 2 · existing tag: "prose"
 ```
@@ -67,7 +67,7 @@ you: stop opening replies with "Sure!"
 before it writes anything.
 
 ```
-you: write me a test for the garage parser
+> write me a test for the garage parser
   → brain_recall  query:"write me a test for the garage parser"
       notes
       #2 · stored 2026-10-25 · this repo runs tests with npx tsx --test using node:test #testing
@@ -129,7 +129,7 @@ with new tags replaces it; two rules that merely share a tag both survive, and y
 One `brain_recall` answers a question with both kinds, each ranked on its own:
 
 ```
-you: add a test for the garage parser
+> add a test for the garage parser
   → brain_recall  query:"add a test for the garage parser"
 
     notes
