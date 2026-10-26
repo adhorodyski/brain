@@ -30,10 +30,12 @@ export type RuleExportRow = {
   topics: string;
   storedAt: string;
   active: number;
-  supersededId: number | null;
 };
 
 export function createRuleStore(port: SqlPort) {
+  const retire = (ruleId: number) =>
+    port.sql("UPDATE rules SET active = 0, dkey = NULL WHERE id = ?", [ruleId]);
+
   const fill = () => {
     const active = port.sql<CountRow>("SELECT COUNT(*) AS n FROM rules WHERE active = 1")[0]?.n ?? 0;
     const total = port.sql<CountRow>("SELECT COUNT(*) AS n FROM rules")[0]?.n ?? 0;
@@ -90,17 +92,11 @@ export function createRuleStore(port: SqlPort) {
       const retired = candidates.filter((row) => sameWords(row.text, body));
 
       port.sql(
-        `INSERT INTO rules (text, topics, at, active, superseded_id, dkey)
-          VALUES (?, ?, ?, 1, NULL, ?)`,
+        `INSERT INTO rules (text, topics, at, active, dkey)
+          VALUES (?, ?, ?, 1, ?)`,
         [body, topics.join(" "), new Date().toISOString(), key],
       );
-      const idOfMine = port.sql<IdRow>("SELECT last_insert_rowid() AS id")[0]?.id ?? 0;
-      for (const row of retired) {
-        port.sql("UPDATE rules SET active = 0, superseded_id = ?, dkey = NULL WHERE id = ?", [
-          idOfMine,
-          row.id,
-        ]);
-      }
+      for (const row of retired) retire(row.id);
       const echo = nearDuplicates(storedTopics(), topics)
         .filter((topic) => !topics.includes(topic))
         .map((topic) => `existing topic: "${topic}"`);
@@ -127,7 +123,7 @@ export function createRuleStore(port: SqlPort) {
           `instruction r#${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
       }
-      port.sql("UPDATE rules SET active = 0, dkey = NULL WHERE id = ?", [ruleId]);
+      retire(ruleId);
       return `retired · ${fill()}`;
     });
   }
@@ -135,7 +131,7 @@ export function createRuleStore(port: SqlPort) {
   function rules(): RuleExportRow[] {
     return port.sql<RuleExportRow>(
       `SELECT id, text, topics AS topics, at AS storedAt,
-        active AS active, superseded_id AS supersededId
+        active AS active
         FROM rules ORDER BY id`,
     );
   }

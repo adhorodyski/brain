@@ -50,13 +50,12 @@ const SCHEMA = [
     INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
   END`,
   `CREATE TABLE IF NOT EXISTS rules (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    text          TEXT NOT NULL,
-    topics        TEXT NOT NULL,
-    at            TEXT NOT NULL,
-    active        INTEGER NOT NULL DEFAULT 1,
-    superseded_id INTEGER,
-    dkey          TEXT UNIQUE
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    text   TEXT NOT NULL,
+    topics TEXT NOT NULL,
+    at     TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    dkey   TEXT UNIQUE
   )`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS rules_ft USING fts5(text, topics, content='rules', content_rowid='rowid')`,
   `CREATE TRIGGER IF NOT EXISTS rules_ai AFTER INSERT ON rules BEGIN
@@ -99,7 +98,6 @@ const ruleRow = (row: RuleExportRow) => ({
   topics: row.topics,
   storedAt: row.storedAt,
   active: row.active === 1,
-  supersededId: row.supersededId,
 });
 
 export class Brain extends DurableObject<Env> {
