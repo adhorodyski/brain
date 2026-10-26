@@ -1,6 +1,16 @@
+<div align="center">
+
 # Brain
 
-**One durable memory for every coding agent you run.** Notes and rules over MCP, on one Cloudflare Worker, on the free tier.
+**One durable memory for every coding agent you run.**
+Notes and rules over MCP, on one Cloudflare Worker, on the free tier.
+
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![MCP](https://img.shields.io/badge/MCP-server-purple)](https://modelcontextprotocol.io/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
+</div>
 
 Your agents start every session knowing nothing about you, and each tool forgets separately. Pi does not know
 what Codex was told. A long session drops its oldest context. A new chat starts cold.
@@ -15,7 +25,7 @@ pi / Codex / Cursor / Claude Code  ──MCP──▶  one Worker  ──▶  on
 
 No model runs here. Your agent does the thinking. Brain stores what is worth keeping and finds it again.
 
-## Try it before you believe it
+## Quick start
 
 ```sh
 npm install
@@ -29,15 +39,11 @@ Point one host at `http://localhost:8787/mcp`, then say this to it:
 the garage code is 4417
 ```
 
-Say it again as a rule and it sticks as an instruction:
-
-```
-never open a reply with "Sure!"
-```
-
 Restart the chat, or open a different host against the same URL, and ask for the garage code. The answer comes
 back with the id and the date it was stored. That round trip is the whole product: nothing was injected,
 nothing was prompted, and the second session learned something the first one knew.
+
+When you are ready for every device to see it, [deploy the Worker](#run-it) and point your hosts at its URL.
 
 ## A week of it
 
@@ -82,6 +88,17 @@ Three hosts, four days, one memory, zero config shared between them.
 - **Say it once.** Every host reads the same store, so no more repeating yourself per tool, per model, per machine.
 - **Nothing happens without you.** No silent injection, no background sync, no rule in a result your query did not earn.
 - **It costs nothing to run.** One Worker on Cloudflare's free tier, no model calls, no API keys, no bill. Access control is Cloudflare Access, and the free plan covers 50 users.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Runtime | [Cloudflare Workers](https://workers.cloudflare.com/) |
+| State | One [Durable Object](https://developers.cloudflare.com/durable-objects/) with SQLite storage |
+| Search | SQLite FTS5 with `bm25()`, tags weighted above text |
+| Protocol | [MCP](https://modelcontextprotocol.io/) over HTTP via `@modelcontextprotocol/server` |
+| Auth | Cloudflare Access with Managed OAuth, enforced at the edge |
+| Language | TypeScript, strict, no `nodejs_compat` |
 
 ## Notes and rules
 
@@ -151,25 +168,29 @@ and renews on its own afterwards. To cut someone off, drop them from the policy.
 
 `wrangler.jsonc` carries an `access.dev` block as the local stand-in for a signed-in identity: change the
 email to test as someone else, delete the block to test the refusal. Put `BRAIN_HOSTNAME` and `MAX_NOTE` in
-`.dev.vars`, then:
+`.dev.vars` (the example file has both), then:
 
 ```sh
-npm install
-cp .dev.vars.example .dev.vars
-npm run dev
+npm run dev                 # local, http://localhost:8787/mcp
+npm run check               # tsc --noEmit
+npx wrangler deploy --dry-run
+npx wrangler deploy         # https://<worker>.workers.dev/mcp
 ```
 
 Local rows live in `.wrangler/state`, so a deploy starts empty.
 
-```sh
-npm run check
-npx wrangler deploy --dry-run
-npx wrangler deploy
-```
-
 `BRAIN_HOSTNAME` must name the hostname you serve, and the `workers.dev` URL counts as one. The host check
 only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
 `Invalid Host`. Set it before the first deploy, not after.
+
+## Scope
+
+- One person's memory, shared across that person's hosts. No team accounts, no per-row ownership.
+- Notes and rules found by search, and nothing else. No injection, no reminders, no vector search, no UI.
+- Searchable memory, not a transcript. Brain keeps what you ask it to keep and says so when it holds nothing.
+
+Contributors and agents should start with [`AGENTS.md`](AGENTS.md) for repo rules and the traps each edit can
+hit.
 
 ## Reference
 
@@ -199,3 +220,7 @@ counts both kinds: a query that finds a rule and no notes is not a miss.
 `learn` caps a rule at `MAX_RULE` characters and refuses one carrying a link, an email or a code fence,
 because a rule should state behaviour and not point somewhere else. Notes and rules are otherwise uncapped:
 both cost tokens only on the turns that retrieve them.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
