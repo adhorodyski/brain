@@ -96,7 +96,7 @@ export function nearDuplicates(stored: string[], wanted: string[]): string[] {
     .filter((match): match is string => match !== undefined);
 }
 
-const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS storedAt,
+const NOTE_SELECT = `SELECT notes.id AS id, notes.tier AS tier, notes.at AS storedAt,
   notes.text AS text, notes.tags AS tags
   FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
   WHERE notes_ft MATCH ?`;
@@ -120,8 +120,8 @@ const fitsNote = (text: string, maxNote: number) => {
   }
 };
 
-const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
-  VALUES (?, ?, ?, ?, ?, ?)`;
+const INSERT_NOTE = `INSERT INTO notes (text, tags, tier, at, dkey)
+  VALUES (?, ?, ?, ?, ?)`;
 
 export function createNoteStore(port: SqlPort, limits: Limits) {
   const coreChars = () =>
@@ -147,7 +147,6 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
 
   const insertNote = (note: NoteInput, text: string, key: string, at: string) => {
     port.sql(INSERT_NOTE, [
-      crypto.randomUUID(),
       text,
       wordList(note.tags).join(" "),
       note.tier,
@@ -168,7 +167,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
 
     const seen = hits.map((row) => row.id);
     const neighbours = port.sql<NoteHitRow>(
-      `${NOTE_SELECT} AND notes.rowid NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
+      `${NOTE_SELECT} AND notes.id NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
       [toFtsQuery(tags.join(" ")), ...seen, 3],
     );
     if (neighbours.length === 0) return lines;
@@ -192,7 +191,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     return port.transaction(() => {
       const lines: string[] = [];
       for (const note of writes) {
-        const dupe = port.sql<IdRow>("SELECT rowid AS id FROM notes WHERE dkey = ?", [note.key])[0];
+        const dupe = port.sql<IdRow>("SELECT id FROM notes WHERE dkey = ?", [note.key])[0];
         if (dupe) {
           lines.push(`stored #${dupe.id} (again, same call)`);
           continue;
@@ -218,7 +217,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
 
     return port.transaction(() => {
       const row = port.sql<NoteBodyRow>(
-        "SELECT rowid AS id, text AS text, tier AS tier FROM notes WHERE rowid = ?",
+        "SELECT id, text, tier FROM notes WHERE id = ?",
         [noteId],
       )[0];
       if (!row) {
@@ -234,7 +233,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
       }
 
       const used = row.tier === "core" ? coreRoom(body.length, current.length) : 0;
-      port.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE rowid = ?", [
+      port.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE id = ?", [
         body,
         new Date().toISOString(),
         key,
@@ -248,7 +247,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     const wanted = flat(confirm);
     return port.transaction(() => {
       const row = port.sql<NoteTextRow>(
-        "SELECT rowid AS id, text AS text FROM notes WHERE rowid = ?",
+        "SELECT id, text FROM notes WHERE id = ?",
         [noteId],
       )[0];
       if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
@@ -257,14 +256,14 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
           `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
         );
       }
-      port.sql("DELETE FROM notes WHERE rowid = ?", [noteId]);
+      port.sql("DELETE FROM notes WHERE id = ?", [noteId]);
       return `forgot #${noteId}`;
     });
   }
 
   function notes(): NoteExportRow[] {
     return port.sql<NoteExportRow>(
-      `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt
+      `SELECT id, text, tags, tier, at AS storedAt
         FROM notes ORDER BY rowid`,
     );
   }

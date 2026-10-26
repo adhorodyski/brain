@@ -33,7 +33,7 @@ export interface ExportReply {
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS notes (
-    key    TEXT PRIMARY KEY,
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
     text   TEXT NOT NULL,
     tags   TEXT NOT NULL DEFAULT '',
     tier   TEXT NOT NULL DEFAULT 'note',
@@ -53,13 +53,13 @@ const SCHEMA = [
     INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
   END`,
   `CREATE TABLE IF NOT EXISTS rules (
-    key            TEXT PRIMARY KEY,
-    text           TEXT NOT NULL,
-    topics         TEXT NOT NULL,
-    at             TEXT NOT NULL,
-    active         INTEGER NOT NULL DEFAULT 1,
-    superseded_key TEXT,
-    dkey           TEXT UNIQUE
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    text          TEXT NOT NULL,
+    topics        TEXT NOT NULL,
+    at            TEXT NOT NULL,
+    active        INTEGER NOT NULL DEFAULT 1,
+    superseded_id INTEGER,
+    dkey          TEXT UNIQUE
   )`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS rules_ft USING fts5(text, topics, content='rules', content_rowid='rowid')`,
   `CREATE TRIGGER IF NOT EXISTS rules_ai AFTER INSERT ON rules BEGIN
@@ -103,7 +103,7 @@ const ruleRow = (row: RuleExportRow) => ({
   topics: row.topics,
   storedAt: row.storedAt,
   active: row.active === 1,
-  supersededKey: row.supersededKey,
+  supersededId: row.supersededId,
 });
 
 export class Brain extends DurableObject<Env> {
