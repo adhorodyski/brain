@@ -86,7 +86,20 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - The `r#id` that `brain_recall` and `brain_learn` print is the only place a host gets an instruction id.
   Remove it and `brain_unlearn` needs an export to find its
   target — the pointer in the not-found error was never the cause, the hidden id was. Notes print `#id` and
-  rules print `r#id` so one number can never name a row in the wrong table.
+  rules print `r#id` so one id can never name a row in the wrong table.
+
+- An id is an opaque string minted by `newId`, never a `rowid`. A bare `rowid` recycles: delete the highest row
+  and the next insert reuses its number, so a `#3` from a stale recall silently names a different note. Measured
+  on `wrangler dev`: forget `#3` of `1,2,3`, write again, and the new note is `#3`. `confirm` still guards
+  writes, but it is now the misremembers-the-text guard, not the recycled-id guard — deleting it because "ids are
+  stable now" drops the protection it actually gives.
+
+- Every `SELECT` that yields an id must read the `id` column and every lookup must key on `id`, in the same
+  edit. Read `rowid AS id` while the `UPDATE` says `WHERE id = ?` and `tsc` stays green: the row is found under
+  one number and mutated under another, so supersede prints `superseded r#1` for a row no recall ever printed,
+  and a patch answers `nothing stored as #1`. `last_insert_rowid()` after an insert returns the SQLite rowid,
+  not the id, and `## Related` excluding on `notes.rowid` while `seen` holds ids re-prints the lead note twice.
+  All three passed `npm run check` and only the MCP suite caught them.
 
 - The supersede `UPDATE` clears `dkey` with `active = 0`, the way `brain_unlearn` does. Leave `dkey` populated
   and re-learning a rule that supersede retired hits the dedupe check before the supersede loop: the answer is

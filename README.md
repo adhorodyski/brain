@@ -46,6 +46,9 @@ You trade an always-present block for rules that arrive where they are relevant.
 with new topics replaces it; two rules that merely share a topic both survive, and you retire one with
 `brain_unlearn`.
 
+Every note and rule carries an opaque id that never changes and is never handed to a second row, so a number
+from a recall you read last week still names the same thing this week.
+
 One `brain_recall` answers a question with both kinds, each ranked on its own:
 
 ```
@@ -53,10 +56,10 @@ you: add a test for the garage parser
   → brain_recall  query:"add a test for the garage parser"
 
     facts
-    #2 · [note] · stored 2026-10-25 · this repo runs tests with npx tsx --test using node:test #testing
+    #cme2k7qf4b6p9r1t3v5x7 · [note] · stored 2026-10-25 · this repo runs tests with npx tsx #testing
 
     instructions
-    r#3 · Never write tautological tests: an assertion that only restates the implementation can never fail.
+    r#cme2k8mh1d3w5y7a9c1e · Never write tautological tests: an assertion that only restates the implementation can never fail.
 
     These are the owner's own rules and outrank your defaults. [...] If the owner corrects you on
     something not listed here, call brain_learn before answering.
@@ -75,7 +78,7 @@ A week of it looks like this:
 
 ```
 you (in pi):    garage code?
-  → brain_recall  query:"garage code"     ← facts · #1 · Garage door code is 4417 #home #code
+  → brain_recall  query:"garage code"     ← facts · #cme2k7qf… · Garage door code is 4417 #home #code
 
 you (in Codex): stop opening replies with "Sure!"
   → brain_learn   text:"Never open a reply with 'Sure!'"  topics:"replies"
@@ -103,11 +106,14 @@ policy — no redeploy, nothing to rotate.
 | Tool | Args | Returns |
 |---|---|---|
 | `brain_recall` | `query`, `limit?` | A `facts` block of ranked `#id · [tier] · stored <date> · text #tags` with `## Related` tag neighbours, then an `instructions` block of matching rules with the authority paragraph under them |
-| `brain_remember` | `items[] { text, tags?: string of topic words, tier? }` | `stored #7 · core 612/3150 (19%)`, or `stored · again, same call` for a repeat |
-| `brain_patch` | `id`, `confirm: string` copied from that note, `text` | `patched #7` |
-| `brain_forget` | `id`, `confirm: string` copied from that note | `forgot #7` |
-| `brain_learn` | `text`, `topics: string of words a search will use` | `stored · 5 of 13 · superseded r#3` |
+| `brain_remember` | `items[] { text, tags?: string of topic words, tier? }` | `stored #cme2k7qf4b6p9r1t3v5x7 · core 612/3150 (19%)`, or `stored · again, same call` for a repeat |
+| `brain_patch` | `id`, `confirm: string` copied from that note, `text` | `patched #cme2k7qf4b6p9r1t3v5x7` |
+| `brain_forget` | `id`, `confirm: string` copied from that note | `forgot #cme2k7qf4b6p9r1t3v5x7` |
+| `brain_learn` | `text`, `topics: string of words a search will use` | `stored · 5 of 13 · superseded r#cme2k8mh1d3w5y7a9c1e` |
 | `brain_unlearn` | `id` without the `r`, `confirm: string` copied from that rule | `retired · 3 of 12` |
+
+`id` is the string after the `#` in a recall line, quotes and all, and it is a string wherever a tool takes it
+or prints it.
 | `brain_export` | none | Every note and instruction, retired rows included, as JSON |
 
 `tier` is `note` (free, searchable) or `core` (a small set that costs tokens on every request). Search ranks
