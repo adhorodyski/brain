@@ -8,7 +8,7 @@ import { brainServer } from "./mcp";
 
 export { Brain };
 
-const BRAIN_ID = "brain";
+const BRAIN_ID = "brain-2026-10-26";
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
