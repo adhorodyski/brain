@@ -30,7 +30,7 @@ export type RuleExportRow = {
   topics: string;
   storedAt: string;
   active: number;
-  supersededKey: string | null;
+  supersededId: number | null;
 };
 
 export function createRuleStore(port: SqlPort) {
@@ -48,7 +48,7 @@ export function createRuleStore(port: SqlPort) {
 
   function match(query: string): string[] {
     const rows = port.sql<RuleMatchRow>(
-      `SELECT rules.rowid AS id, rules.text AS text, rules.topics AS topics
+      `SELECT rules.id, rules.text, rules.topics
         FROM rules_ft JOIN rules ON rules.rowid = rules_ft.rowid
         WHERE rules_ft MATCH ? AND rules.active = 1
         ORDER BY bm25(rules_ft, 1.0, 5.0) LIMIT ?`,
@@ -80,27 +80,27 @@ export function createRuleStore(port: SqlPort) {
 
     const key = await port.digest([topics.join(" "), body]);
     return port.transaction(() => {
-      if (port.sql<IdRow>("SELECT rowid AS id FROM rules WHERE dkey = ?", [key])[0]) {
+      if (port.sql<IdRow>("SELECT id FROM rules WHERE dkey = ?", [key])[0]) {
         return `stored · again, same call · ${fill()}`;
       }
 
       const candidates = port.sql<RuleCandidateRow>(
-        "SELECT rowid AS id, text AS text FROM rules WHERE active = 1",
+        "SELECT id, text FROM rules WHERE active = 1",
       );
       const retired = candidates.filter((row) => sameWords(row.text, body));
 
-      const keyOfMine = crypto.randomUUID();
+      port.sql(
+        `INSERT INTO rules (text, topics, at, active, superseded_id, dkey)
+          VALUES (?, ?, ?, 1, NULL, ?)`,
+        [body, topics.join(" "), new Date().toISOString(), key],
+      );
+      const idOfMine = port.sql<IdRow>("SELECT last_insert_rowid() AS id")[0]?.id ?? 0;
       for (const row of retired) {
-        port.sql("UPDATE rules SET active = 0, superseded_key = ?, dkey = NULL WHERE rowid = ?", [
-          keyOfMine,
+        port.sql("UPDATE rules SET active = 0, superseded_id = ?, dkey = NULL WHERE id = ?", [
+          idOfMine,
           row.id,
         ]);
       }
-      port.sql(
-        `INSERT INTO rules (key, text, topics, at, active, superseded_key, dkey)
-          VALUES (?, ?, ?, ?, 1, NULL, ?)`,
-        [keyOfMine, body, topics.join(" "), new Date().toISOString(), key],
-      );
       const echo = nearDuplicates(storedTopics(), topics)
         .filter((topic) => !topics.includes(topic))
         .map((topic) => `existing topic: "${topic}"`);
@@ -113,7 +113,7 @@ export function createRuleStore(port: SqlPort) {
     const wanted = flat(confirm);
     return port.transaction(() => {
       const row = port.sql<RuleStateRow>(
-        "SELECT rowid AS id, text AS text, active AS active FROM rules WHERE rowid = ?",
+        "SELECT id, text, active FROM rules WHERE id = ?",
         [ruleId],
       )[0];
       if (!row) {
@@ -127,16 +127,16 @@ export function createRuleStore(port: SqlPort) {
           `instruction r#${ruleId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_unlearn needs a fragment of that rule's own words`,
         );
       }
-      port.sql("UPDATE rules SET active = 0, dkey = NULL WHERE rowid = ?", [ruleId]);
+      port.sql("UPDATE rules SET active = 0, dkey = NULL WHERE id = ?", [ruleId]);
       return `retired · ${fill()}`;
     });
   }
 
   function rules(): RuleExportRow[] {
     return port.sql<RuleExportRow>(
-      `SELECT rowid AS id, text AS text, topics AS topics, at AS storedAt,
-        active AS active, superseded_key AS supersededKey
-        FROM rules ORDER BY rowid`,
+      `SELECT id, text, topics AS topics, at AS storedAt,
+        active AS active, superseded_id AS supersededId
+        FROM rules ORDER BY id`,
     );
   }
 
