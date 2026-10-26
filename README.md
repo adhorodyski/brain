@@ -123,8 +123,7 @@ counts both kinds: a query that finds a rule and no facts is not a miss.
 `MAX_NOTE` (300) caps one note; an over-budget write throws and names the overage, and nothing truncates.
 `learn` caps a rule at 200 characters and refuses one carrying a link, an email or a code fence,
 because a rule should state behaviour and not point somewhere else. Notes and rules are otherwise uncapped:
-both cost tokens only on the turns that retrieve them, so the reason for a standing budget went away
-when the standing block did.
+both cost tokens only on the turns that retrieve them.
 
 `BRAIN_HOSTNAME` must name the hostname you serve, and the `workers.dev` URL counts as one. The host check
 only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
