@@ -7,7 +7,7 @@ export type Sql = <T extends SqlRow = SqlRow>(
 
 export interface SqlPort {
   sql: Sql;
-  transaction<T>(body: () => T): T;
+  transaction<T>(run: () => T): T;
   digest(parts: readonly string[]): Promise<string>;
 }
 
@@ -33,7 +33,7 @@ export type NoteExportRow = {
 const INVISIBLE =
   /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
 const TAG_GAP = /[\s,]+/;
-const MAX_TAG_EDITS = 2;
+const MAX_MISS_EDITS = 2;
 export function flat(text: string): string {
   return text.replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
 }
@@ -77,22 +77,22 @@ function boundedEdits(a: string, b: string, limit: number): number {
   return edits > limit ? limit + 1 : edits;
 }
 
-function nearestMatch(wanted: string, stored: string[]): string | undefined {
+function nearestMiss(wanted: string, stored: string[]): string | undefined {
   const ranked = stored
     .filter((candidate) => candidate !== wanted)
-    .map((candidate) => ({ candidate, edits: boundedEdits(wanted, candidate, MAX_TAG_EDITS) }))
-    .filter((match) => match.edits <= MAX_TAG_EDITS)
+    .map((candidate) => ({ candidate, edits: boundedEdits(wanted, candidate, MAX_MISS_EDITS) }))
+    .filter((miss) => miss.edits <= MAX_MISS_EDITS)
     .sort((left, right) => left.edits - right.edits || left.candidate.localeCompare(right.candidate));
   return ranked[0]?.candidate;
 }
 
-export function nearDuplicates(stored: string[], wanted: string[]): string[] {
+export function nearMisses(stored: string[], wanted: string[]): string[] {
   if (wanted.length === 0) return [];
-  return wanted.map((tag) => nearestMatch(tag, stored)).filter((match): match is string => match !== undefined);
+  return wanted.map((tag) => nearestMiss(tag, stored)).filter((miss): miss is string => miss !== undefined);
 }
 
 export const noMatchLine = (query: string) =>
-  `nothing stored matching "${flat(query).slice(0, 120)}" — the archive holds nothing on this and another query will not find it, so ask the owner or say you do not know`;
+  `nothing stored matching "${flat(query).slice(0, 120)}" — the brain holds nothing on this and another query will not find it, so ask the owner or say you do not know`;
 
 const noteLine = (row: NoteHitRow) => {
   const tags = renderTags(row.tags);
@@ -100,7 +100,7 @@ const noteLine = (row: NoteHitRow) => {
   return tags ? `${head} · ${row.text} ${tags}` : `${head} · ${row.text}`;
 };
 
-const fitsNote = (text: string, maxNote: number) => {
+const requireNoteCap = (text: string, maxNote: number) => {
   if (text.length === 0) throw new Error("empty text stores nothing");
   if (text.length > maxNote) {
     throw new Error(
@@ -113,7 +113,7 @@ const INSERT_NOTE = `INSERT INTO notes (text, tags, at, dkey)
   VALUES (?, ?, ?, ?)`;
 
 export function createNoteStore(port: SqlPort, maxNote: number) {
-  const storedTags = () =>
+  const allTags = () =>
     [...new Set(port.sql<StoredTagsRow>("SELECT DISTINCT tags FROM notes").flatMap((row) => wordList(row.tags)))];
 
   const insertNote = (note: NoteInput, text: string, key: string, at: string) => {
@@ -136,7 +136,7 @@ export function createNoteStore(port: SqlPort, maxNote: number) {
   async function remember(items: NoteInput[]): Promise<string> {
     const notes = items.map((item) => {
       const text = flat(item.text);
-      fitsNote(text, maxNote);
+      requireNoteCap(text, maxNote);
       return { item, text, tags: wordList(item.tags) };
     });
     const writes = await Promise.all(
@@ -155,7 +155,7 @@ export function createNoteStore(port: SqlPort, maxNote: number) {
           lines.push(`stored #${dupe.id} (again, same call)`);
           continue;
         }
-        const echo = nearDuplicates(storedTags(), note.tags).map((tag) => `existing tag: "${tag}"`);
+        const echo = nearMisses(allTags(), note.tags).map((tag) => `existing tag: "${tag}"`);
         const id = insertNote(note.item, note.text, note.key, at);
         lines.push([`stored #${id}`, ...echo].join(" · "));
       }
@@ -163,28 +163,27 @@ export function createNoteStore(port: SqlPort, maxNote: number) {
     });
   }
 
-  async function patch(noteId: number, confirm: string, text: string): Promise<string> {
-    const body = flat(text);
-    fitsNote(body, maxNote);
+  async function patch(noteId: number, confirm: string, raw: string): Promise<string> {
+    const text = flat(raw);
+    requireNoteCap(text, maxNote);
     const wanted = flat(confirm);
-    const key = await port.digest([String(noteId), wanted, body]);
+    const key = await port.digest([String(noteId), wanted, text]);
 
     return port.transaction(() => {
       const row = port.sql<NoteBodyRow>("SELECT id, text FROM notes WHERE id = ?", [noteId])[0];
       if (!row) {
-        throw new Error(`nothing stored as #${noteId}; run brain_recall and use a number it prints`);
+        throw new Error(`nothing stored as #${noteId}; run brain_recall and use an id it prints`);
       }
 
-      const current = row.text;
-      if (current === body) return `patched #${noteId}`;
-      if (wanted.length === 0 || !current.includes(wanted)) {
+      if (row.text === text) return `patched #${noteId}`;
+      if (wanted.length === 0 || !row.text.includes(wanted)) {
         throw new Error(
-          `#${noteId} does not contain "${wanted}"; it reads "${current}". Nothing changed — brain_patch needs a fragment of that note's own text`,
+          `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing changed — brain_patch needs a fragment of that note's own text`,
         );
       }
 
       port.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE id = ?", [
-        body,
+        text,
         new Date().toISOString(),
         key,
         noteId,
@@ -211,12 +210,12 @@ export function createNoteStore(port: SqlPort, maxNote: number) {
     });
   }
 
-  function notes(): NoteExportRow[] {
+  function allNotes(): NoteExportRow[] {
     return port.sql<NoteExportRow>(
       `SELECT id, text, tags, at AS storedAt
         FROM notes ORDER BY rowid`,
     );
   }
 
-  return { recall, remember, patch, forget, notes };
+  return { recall, remember, patch, forget, allNotes };
 }
