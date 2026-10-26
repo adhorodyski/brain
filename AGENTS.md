@@ -13,6 +13,8 @@ nothing else.
 | `src/store.ts` | All note SQL: budgets, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
 | `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by identical wording, tombstones, the matching query, and the authority paragraph |
 | `src/env.d.ts` | `Env` |
+| `tools-protocol-check.mjs` | The checks below, as MCP calls against a running Worker. One `CHECK` per behaviour group |
+| `tools-run-check.sh` | Boots a throwaway `wrangler dev` for that probe and restores `.dev.vars` after |
 
 ## Rules
 
@@ -96,8 +98,13 @@ Each of these has a plausible-looking edit that breaks it quietly.
 
 ```sh
 npm run check
+npm run check:tools
 npx wrangler deploy --dry-run
 ```
+
+`tools-run-check.sh <check>` boots its own `wrangler dev` on a scratch state dir, points
+`tools-protocol-check.mjs` at it, and restores `.dev.vars` afterwards. Checks are `behaviour`, `caps`, `limits`,
+`fractional`, `tiebreak` and `tagscan`; extras before `--` reach the probe (`EXPECT_MAX_NOTE=400 ./tools-run-check.sh caps`), extras after `--` reach `.dev.vars` for that run only.
 
 The dry-run bundles at 217 KiB gzipped. Tens more means a dependency crept in.
 
