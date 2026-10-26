@@ -42,7 +42,6 @@ const exportShape = z.object({
       topics: z.string(),
       storedAt: z.string(),
       active: z.boolean(),
-      supersededId: z.number().nullable(),
     }),
   ),
   counts: z.object({
