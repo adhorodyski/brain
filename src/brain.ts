@@ -2,12 +2,13 @@ import { DurableObject } from "cloudflare:workers";
 import {
   createNoteStore,
   noMatchLine,
-  type SqlPort,
+  type NoteExportRow,
   type NoteInput,
-  type Row,
+  type SqlPort,
+  type SqlRow,
   type SqlValue,
 } from "./store";
-import { createRuleStore } from "./rules";
+import { createRuleStore, type RuleExportRow } from "./rules";
 
 export interface Reply {
   text: string;
@@ -88,21 +89,21 @@ const numberFrom = (value: string | undefined, fallback: number) => {
 
 export const maxNoteFrom = (env: Env) => numberFrom(env.MAX_NOTE, 300);
 
-const noteRow = (row: Row) => ({
-  id: Number(row.id),
-  text: String(row.text),
-  tier: String(row.tier),
-  tags: String(row.tags),
-  storedAt: String(row.storedAt),
+const noteRow = (row: NoteExportRow) => ({
+  id: row.id,
+  text: row.text,
+  tier: row.tier,
+  tags: row.tags,
+  storedAt: row.storedAt,
 });
 
-const ruleRow = (row: Row) => ({
-  id: Number(row.id),
-  text: String(row.text),
-  topics: String(row.topics),
-  storedAt: String(row.storedAt),
-  active: Number(row.active) === 1,
-  supersededKey: row.supersededKey === null ? null : String(row.supersededKey),
+const ruleRow = (row: RuleExportRow) => ({
+  id: row.id,
+  text: row.text,
+  topics: row.topics,
+  storedAt: row.storedAt,
+  active: row.active === 1,
+  supersededKey: row.supersededKey,
 });
 
 export class Brain extends DurableObject<Env> {
@@ -112,8 +113,8 @@ export class Brain extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const port: SqlPort = {
-      sql: (statement, values) =>
-        [...this.ctx.storage.sql.exec<Record<string, SqlValue>>(statement, ...(values ?? []))],
+      sql: <T extends SqlRow>(statement: string, values?: readonly SqlValue[]) =>
+        [...this.ctx.storage.sql.exec<T>(statement, ...(values ?? []))],
       transaction: (body) => this.ctx.storage.transactionSync(body),
       digest: async (parts) => {
         const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("\u0000")));
@@ -131,9 +132,11 @@ export class Brain extends DurableObject<Env> {
 
   private ensureSchema(): void {
     const built = new Set(
-      [...this.ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE name IN ('notes', 'rules')")].map(
-        (row) => String(row.name),
-      ),
+      [
+        ...this.ctx.storage.sql.exec<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE name IN ('notes', 'rules')",
+        ),
+      ].map((row) => row.name),
     );
     if (built.has("notes") && built.has("rules")) return;
     for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
@@ -182,8 +185,8 @@ export class Brain extends DurableObject<Env> {
   async export(): Promise<ExportReply> {
     const notes = this.notes.notes();
     const rules = this.rules.rules();
-    const core = notes.filter((row) => String(row.tier) === "core").length;
-    const active = rules.filter((row) => Number(row.active) === 1).length;
+    const core = notes.filter((row) => row.tier === "core").length;
+    const active = rules.filter((row) => row.active === 1).length;
     return {
       notes: notes.map(noteRow),
       instructions: rules.map(ruleRow),

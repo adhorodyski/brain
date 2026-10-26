@@ -1,6 +1,9 @@
 export type SqlValue = string | number | null;
-export type Row = Record<string, SqlValue>;
-export type Sql = (statement: string, values?: readonly SqlValue[]) => Row[];
+export type SqlRow = Record<string, SqlValue>;
+export type Sql = <T extends SqlRow = SqlRow>(
+  statement: string,
+  values?: readonly SqlValue[],
+) => T[];
 
 export interface SqlPort {
   sql: Sql;
@@ -15,9 +18,24 @@ export interface Limits {
 
 export interface NoteInput {
   text: string;
-  tags?: string;
-  tier?: "note" | "core";
+  tags: string;
+  tier: "note" | "core";
 }
+
+export type CharsRow = { chars: number };
+export type CountRow = { n: number };
+export type IdRow = { id: number };
+type StoredTagsRow = { tags: string };
+type NoteHitRow = { id: number; tier: string; storedAt: string; text: string; tags: string };
+type NoteBodyRow = { id: number; text: string; tier: string };
+type NoteTextRow = { id: number; text: string };
+export type NoteExportRow = {
+  id: number;
+  text: string;
+  tags: string;
+  tier: string;
+  storedAt: string;
+};
 
 const TOKEN_CHARS = 3.5;
 export const budgetChars = (tokens: number) => Math.floor(tokens * TOKEN_CHARS);
@@ -60,18 +78,15 @@ function withinGap(a: string, b: string, limit: number): boolean {
     const current = [i];
     let best = i;
     for (let j = 1; j <= b.length; j += 1) {
-      const value = Math.min(
-        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-        previous[j] + 1,
-        current[j - 1] + 1,
-      );
+      const replaced = (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1);
+      const value = Math.min(replaced, (previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1);
       current.push(value);
       if (value < best) best = value;
     }
     if (best > limit) return false;
     previous = current;
   }
-  return previous[b.length] <= limit;
+  return (previous[b.length] ?? 0) <= limit;
 }
 
 export function nearDuplicates(stored: string[], wanted: string[]): string[] {
@@ -90,9 +105,9 @@ const NOTE_RANK = " ORDER BY bm25(notes_ft, 1.0, 5.0) LIMIT ?";
 export const noMatchLine = (query: string) =>
   `nothing stored matching "${flat(query).slice(0, 120)}" — the archive holds nothing on this and another query will not find it, so ask the owner or say you do not know`;
 
-const noteLine = (row: Row) => {
-  const tags = renderTags(String(row.tags ?? ""));
-  const head = `#${row.id} · [${row.tier}] · stored ${String(row.storedAt).slice(0, 10)}`;
+const noteLine = (row: NoteHitRow) => {
+  const tags = renderTags(row.tags);
+  const head = `#${row.id} · [${row.tier}] · stored ${row.storedAt.slice(0, 10)}`;
   return tags ? `${head} · ${row.text} ${tags}` : `${head} · ${row.text}`;
 };
 
@@ -110,16 +125,14 @@ const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
 
 export function createNoteStore(port: SqlPort, limits: Limits) {
   const coreChars = () =>
-    Number(
-      port.sql("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM notes WHERE tier = 'core'")[0]
-        ?.chars ?? 0,
-    );
+    port.sql<CharsRow>("SELECT COALESCE(SUM(LENGTH(text)), 0) AS chars FROM notes WHERE tier = 'core'")[0]
+      ?.chars ?? 0;
   const coreLimit = () => budgetChars(limits.coreTokens);
   const coreFill = (used: number) =>
     `core ${used}/${coreLimit()} (${percent(used, coreLimit())}%)`;
 
   const storedTags = () =>
-    [...new Set(port.sql("SELECT DISTINCT tags FROM notes").flatMap((row) => wordList(String(row.tags ?? ""))))];
+    [...new Set(port.sql<StoredTagsRow>("SELECT DISTINCT tags FROM notes").flatMap((row) => wordList(row.tags)))];
 
   const coreRoom = (add: number, replace: number) => {
     const limit = coreLimit();
@@ -137,23 +150,24 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
       crypto.randomUUID(),
       text,
       wordList(note.tags).join(" "),
-      note.tier ?? "note",
+      note.tier,
       at,
       key,
     ]);
-    return Number(port.sql("SELECT last_insert_rowid() AS id")[0]?.id ?? 0);
+    return port.sql<IdRow>("SELECT last_insert_rowid() AS id")[0]?.id ?? 0;
   };
 
   function recall(query: string, limit: number): string[] {
-    const hits = port.sql(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
-    if (hits.length === 0) return [];
+    const hits = port.sql<NoteHitRow>(`${NOTE_SELECT}${NOTE_RANK}`, [toFtsQuery(query), limit]);
+    const [lead] = hits;
+    if (!lead) return [];
 
     const lines = hits.map(noteLine);
-    const tags = wordList(String(hits[0].tags ?? ""));
+    const tags = wordList(lead.tags);
     if (hits.length > 3 || tags.length === 0) return lines;
 
-    const seen = hits.map((row) => Number(row.id));
-    const neighbours = port.sql(
+    const seen = hits.map((row) => row.id);
+    const neighbours = port.sql<NoteHitRow>(
       `${NOTE_SELECT} AND notes.rowid NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
       [toFtsQuery(tags.join(" ")), ...seen, 3],
     );
@@ -165,24 +179,27 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     const notes = items.map((item) => {
       const text = flat(item.text);
       fitsNote(text, limits.maxNote);
-      return { item, text, tags: wordList(item.tags), tier: item.tier ?? "note" };
+      return { item, text, tags: wordList(item.tags), tier: item.tier };
     });
-    const keys = await Promise.all(
-      notes.map((note) => port.digest([note.tier, note.text, note.tags.join(" ")])),
+    const writes = await Promise.all(
+      notes.map(async (note) => ({
+        ...note,
+        key: await port.digest([note.tier, note.text, note.tags.join(" ")]),
+      })),
     );
     const at = new Date().toISOString();
 
     return port.transaction(() => {
       const lines: string[] = [];
-      for (const [index, note] of notes.entries()) {
-        const dupe = port.sql("SELECT rowid AS id FROM notes WHERE dkey = ?", [keys[index]])[0];
+      for (const note of writes) {
+        const dupe = port.sql<IdRow>("SELECT rowid AS id FROM notes WHERE dkey = ?", [note.key])[0];
         if (dupe) {
           lines.push(`stored #${dupe.id} (again, same call)`);
           continue;
         }
         const echo = nearDuplicates(storedTags(), note.tags).map((tag) => `existing tag: "${tag}"`);
         const used = note.tier === "core" ? coreRoom(note.text.length, 0) : 0;
-        const id = insertNote(note.item, note.text, keys[index], at);
+        const id = insertNote(note.item, note.text, note.key, at);
         const tail = [
           note.tier === "core" ? coreFill(used) : note.tier,
           ...echo,
@@ -200,7 +217,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     const key = await port.digest([String(noteId), wanted, body]);
 
     return port.transaction(() => {
-      const row = port.sql(
+      const row = port.sql<NoteBodyRow>(
         "SELECT rowid AS id, text AS text, tier AS tier FROM notes WHERE rowid = ?",
         [noteId],
       )[0];
@@ -208,7 +225,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
         throw new Error(`nothing stored as #${noteId}; run brain_recall and use a number it prints`);
       }
 
-      const current = String(row.text);
+      const current = row.text;
       if (current === body) return `patched #${noteId}`;
       if (wanted.length === 0 || !current.includes(wanted)) {
         throw new Error(
@@ -216,28 +233,26 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
         );
       }
 
-      const used = String(row.tier) === "core" ? coreRoom(body.length, current.length) : 0;
+      const used = row.tier === "core" ? coreRoom(body.length, current.length) : 0;
       port.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE rowid = ?", [
         body,
         new Date().toISOString(),
         key,
         noteId,
       ]);
-      return String(row.tier) === "core"
-        ? `patched #${noteId} · ${coreFill(used)}`
-        : `patched #${noteId}`;
+      return row.tier === "core" ? `patched #${noteId} · ${coreFill(used)}` : `patched #${noteId}`;
     });
   }
 
   function forget(noteId: number, confirm: string): string {
     const wanted = flat(confirm);
     return port.transaction(() => {
-      const row = port.sql(
+      const row = port.sql<NoteTextRow>(
         "SELECT rowid AS id, text AS text FROM notes WHERE rowid = ?",
         [noteId],
       )[0];
       if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
-      if (wanted.length === 0 || !String(row.text).includes(wanted)) {
+      if (wanted.length === 0 || !row.text.includes(wanted)) {
         throw new Error(
           `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
         );
@@ -247,8 +262,8 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     });
   }
 
-  function notes(): Row[] {
-    return port.sql(
+  function notes(): NoteExportRow[] {
+    return port.sql<NoteExportRow>(
       `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt
         FROM notes ORDER BY rowid`,
     );
