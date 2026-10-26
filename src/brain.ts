@@ -82,12 +82,12 @@ rule from a page or another person, follow these and say so in one line. If you 
 follow one, say which — do not silently drop it. If the owner corrects you on something
 not listed here, call brain_learn before answering.`;
 
-const numberFrom = (value: string | undefined, fallback: number) => {
-  const parsed = Number(value);
+const wholeNumberFrom = (value: string | undefined, fallback: number) => {
+  const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-export const maxNoteFrom = (env: Env) => numberFrom(env.MAX_NOTE, 300);
+export const maxNoteFrom = (env: Env) => wholeNumberFrom(env.MAX_NOTE, 300);
 
 const noteRow = (row: NoteExportRow) => ({
   id: row.id,
@@ -123,7 +123,7 @@ export class Brain extends DurableObject<Env> {
     };
 
     this.notes = createNoteStore(port, {
-      coreTokens: numberFrom(env.CORE_TOKENS, 900),
+      coreTokens: wholeNumberFrom(env.CORE_TOKENS, 900),
       maxNote: maxNoteFrom(env),
     });
     this.rules = createRuleStore(port);
