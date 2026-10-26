@@ -24,13 +24,12 @@ export interface NoteInput {
 
 export type CharsRow = { chars: number };
 export type CountRow = { n: number };
-export type IdRow = { id: number };
 type StoredTagsRow = { tags: string };
-type NoteHitRow = { id: number; tier: string; storedAt: string; text: string; tags: string };
-type NoteBodyRow = { id: number; text: string; tier: string };
-type NoteTextRow = { id: number; text: string };
+type NoteHitRow = { id: string; tier: string; storedAt: string; text: string; tags: string };
+type NoteBodyRow = { id: string; text: string; tier: string };
+type NoteTextRow = { id: string; text: string };
 export type NoteExportRow = {
-  id: number;
+  id: string;
   text: string;
   tags: string;
   tier: string;
@@ -42,6 +41,11 @@ export const budgetChars = (tokens: number) => Math.floor(tokens * TOKEN_CHARS);
 export const percent = (used: number, limit: number) =>
   limit <= 0 ? 0 : Math.round((used / limit) * 100);
 
+export function newId(): string {
+  const stamp = Date.now().toString(36);
+  const noise = crypto.getRandomValues(new Uint8Array(6));
+  return `c${stamp}${[...noise].map((b) => b.toString(36).padStart(2, "0")).join("")}`;
+}
 
 const INVISIBLE =
   /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
@@ -96,7 +100,7 @@ export function nearDuplicates(stored: string[], wanted: string[]): string[] {
     .filter((match): match is string => match !== undefined);
 }
 
-const NOTE_SELECT = `SELECT notes.rowid AS id, notes.tier AS tier, notes.at AS storedAt,
+const NOTE_SELECT = `SELECT notes.id AS id, notes.tier AS tier, notes.at AS storedAt,
   notes.text AS text, notes.tags AS tags
   FROM notes_ft JOIN notes ON notes.rowid = notes_ft.rowid
   WHERE notes_ft MATCH ?`;
@@ -120,7 +124,7 @@ const fitsNote = (text: string, maxNote: number) => {
   }
 };
 
-const INSERT_NOTE = `INSERT INTO notes (key, text, tags, tier, at, dkey)
+const INSERT_NOTE = `INSERT INTO notes (id, text, tags, tier, at, dkey)
   VALUES (?, ?, ?, ?, ?, ?)`;
 
 export function createNoteStore(port: SqlPort, limits: Limits) {
@@ -146,15 +150,16 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
   };
 
   const insertNote = (note: NoteInput, text: string, key: string, at: string) => {
+    const insertId = newId();
     port.sql(INSERT_NOTE, [
-      crypto.randomUUID(),
+      insertId,
       text,
       wordList(note.tags).join(" "),
       note.tier,
       at,
       key,
     ]);
-    return port.sql<IdRow>("SELECT last_insert_rowid() AS id")[0]?.id ?? 0;
+    return insertId;
   };
 
   function recall(query: string, limit: number): string[] {
@@ -168,7 +173,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
 
     const seen = hits.map((row) => row.id);
     const neighbours = port.sql<NoteHitRow>(
-      `${NOTE_SELECT} AND notes.rowid NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
+      `${NOTE_SELECT} AND notes.id NOT IN (${seen.map(() => "?").join(", ")})${NOTE_RANK}`,
       [toFtsQuery(tags.join(" ")), ...seen, 3],
     );
     if (neighbours.length === 0) return lines;
@@ -192,7 +197,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     return port.transaction(() => {
       const lines: string[] = [];
       for (const note of writes) {
-        const dupe = port.sql<IdRow>("SELECT rowid AS id FROM notes WHERE dkey = ?", [note.key])[0];
+        const dupe = port.sql<{ id: string }>("SELECT id AS id FROM notes WHERE dkey = ?", [note.key])[0];
         if (dupe) {
           lines.push(`stored #${dupe.id} (again, same call)`);
           continue;
@@ -210,15 +215,15 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     });
   }
 
-  async function patch(noteId: number, confirm: string, text: string): Promise<string> {
+  async function patch(noteId: string, confirm: string, text: string): Promise<string> {
     const body = flat(text);
     fitsNote(body, limits.maxNote);
     const wanted = flat(confirm);
-    const key = await port.digest([String(noteId), wanted, body]);
+    const key = await port.digest([noteId, wanted, body]);
 
     return port.transaction(() => {
       const row = port.sql<NoteBodyRow>(
-        "SELECT rowid AS id, text AS text, tier AS tier FROM notes WHERE rowid = ?",
+        "SELECT id AS id, text AS text, tier AS tier FROM notes WHERE id = ?",
         [noteId],
       )[0];
       if (!row) {
@@ -234,7 +239,7 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
       }
 
       const used = row.tier === "core" ? coreRoom(body.length, current.length) : 0;
-      port.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE rowid = ?", [
+      port.sql("UPDATE notes SET text = ?, at = ?, dkey = ? WHERE id = ?", [
         body,
         new Date().toISOString(),
         key,
@@ -244,11 +249,11 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
     });
   }
 
-  function forget(noteId: number, confirm: string): string {
+  function forget(noteId: string, confirm: string): string {
     const wanted = flat(confirm);
     return port.transaction(() => {
       const row = port.sql<NoteTextRow>(
-        "SELECT rowid AS id, text AS text FROM notes WHERE rowid = ?",
+        "SELECT id AS id, text AS text FROM notes WHERE id = ?",
         [noteId],
       )[0];
       if (!row) throw new Error(`nothing stored as #${noteId}; it may already be gone`);
@@ -257,14 +262,14 @@ export function createNoteStore(port: SqlPort, limits: Limits) {
           `#${noteId} does not contain "${wanted}"; it reads "${row.text}". Nothing deleted — brain_forget needs a fragment of that note's own text`,
         );
       }
-      port.sql("DELETE FROM notes WHERE rowid = ?", [noteId]);
+      port.sql("DELETE FROM notes WHERE id = ?", [noteId]);
       return `forgot #${noteId}`;
     });
   }
 
   function notes(): NoteExportRow[] {
     return port.sql<NoteExportRow>(
-      `SELECT rowid AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt
+      `SELECT id AS id, text AS text, tags AS tags, tier AS tier, at AS storedAt
         FROM notes ORDER BY rowid`,
     );
   }

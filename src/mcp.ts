@@ -35,7 +35,7 @@ const noteItem = (maxNote: number) =>
 const exportShape = z.object({
   notes: z.array(
     z.object({
-      id: z.number(),
+      id: z.string(),
       text: z.string(),
       tags: z.string(),
       tier: z.string(),
@@ -44,12 +44,12 @@ const exportShape = z.object({
   ),
   instructions: z.array(
     z.object({
-      id: z.number(),
+      id: z.string(),
       text: z.string(),
       topics: z.string(),
       storedAt: z.string(),
       active: z.boolean(),
-      supersededKey: z.string().nullable(),
+      supersededId: z.string().nullable(),
     }),
   ),
   counts: z.object({
@@ -109,7 +109,7 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
       title: "Patch a note",
       description: `Rewrite one stored note in place. Takes the #number brain_recall printed and confirm, a fragment taken verbatim from that note's own text; the two must agree or nothing changes. Prefer this over brain_forget plus brain_remember when a fact changed.`,
       inputSchema: z.object({
-        id: z.number().int().min(1).describe("The note number from a recall line"),
+        id: z.string().describe("The note id from a recall line"),
         confirm: z.string().describe("Words copied from that note's current text"),
         text: z.string().describe(`The whole new note, at most ${maxNote} characters`),
       }),
@@ -124,7 +124,7 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
       title: "Forget a note",
       description: `Delete one stored note permanently. Takes the note number and confirm, a fragment of that note's own text; the two must agree or nothing is deleted. Ask the owner first.`,
       inputSchema: z.object({
-        id: z.number().int().min(1).describe("The note number from a recall line"),
+        id: z.string().describe("The note id from a recall line"),
         confirm: z.string().describe("Words copied from that note's text"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true },
@@ -156,7 +156,7 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
       title: "Retire an instruction",
       description: `Retire one rule. Takes the r#number brain_recall or brain_learn prints beside that rule, plus confirm, a fragment of its own words; the two must agree or nothing changes. The rule stops shaping replies and stays in the export as history.`,
       inputSchema: z.object({
-        id: z.number().int().min(1).describe("The instruction id, without the r prefix"),
+        id: z.string().describe("The instruction id, without the r prefix"),
         confirm: z.string().describe("Words copied from that rule's text"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true },
@@ -185,9 +185,9 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
 export interface BrainHandle {
   recall(query: string, limit: number): Promise<Reply>;
   remember(items: NoteInput[]): Promise<Reply>;
-  patch(id: number, confirm: string, text: string): Promise<Reply>;
-  forget(id: number, confirm: string): Promise<Reply>;
+  patch(id: string, confirm: string, text: string): Promise<Reply>;
+  forget(id: string, confirm: string): Promise<Reply>;
   learn(text: string, topics: string): Promise<Reply>;
-  unlearn(id: number, confirm: string): Promise<Reply>;
+  unlearn(id: string, confirm: string): Promise<Reply>;
   export(): Promise<ExportReply>;
 }
