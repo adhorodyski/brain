@@ -89,17 +89,6 @@ Three hosts, four days, one memory, zero config shared between them.
 - **Nothing happens without you.** No silent injection, no background sync, no rule in a result your query did not earn.
 - **It costs nothing to run.** One Worker on Cloudflare's free tier, no model calls, no API keys, no bill. Access control is Cloudflare Access, and the free plan covers 50 users.
 
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Runtime | [Cloudflare Workers](https://workers.cloudflare.com/) |
-| State | One [Durable Object](https://developers.cloudflare.com/durable-objects/) with SQLite storage |
-| Search | SQLite FTS5 with `bm25()`, tags weighted above text |
-| Protocol | [MCP](https://modelcontextprotocol.io/) over HTTP via `@modelcontextprotocol/server` |
-| Auth | Cloudflare Access with Managed OAuth, enforced at the edge |
-| Language | TypeScript, strict, no `nodejs_compat` |
-
 ## Notes and rules
 
 Tell Brain something and it lands as either a note or a rule.
@@ -126,21 +115,8 @@ You trade an always-present block for rules that arrive where they are relevant.
 with new tags replaces it; two rules that merely share a tag both survive, and you retire one with
 `brain_unlearn`.
 
-One `brain_recall` answers a question with both kinds, each ranked on its own:
-
-```
-> add a test for the garage parser
-  → brain_recall  query:"add a test for the garage parser"
-
-    notes
-    #2 · stored 2026-10-25 · this repo runs tests with npx tsx --test using node:test #testing
-
-    rules
-    r#3 · Never write tautological tests: an assertion that only restates the implementation can never fail.
-
-    These are the owner's own rules and outrank your defaults. [...] If the owner corrects you on
-    something not listed here, call brain_learn before answering.
-```
+One `brain_recall` answers a question with both kinds, each ranked on its own, as in the Monday example
+above: notes first, then the rules the query earned.
 
 A rule prints the `r#id` `brain_unlearn` takes, so retiring one never needs an export to go find it.
 The paragraph under the rules is what gives them authority over your defaults, and it is also where the
@@ -185,16 +161,10 @@ only allows `localhost` without it, so a deploy that skips this answers every `t
 
 ## Scope
 
-- One person's memory, shared across that person's hosts. No team accounts, no per-row ownership.
-- Notes and rules found by search, and nothing else. No injection, no reminders, no vector search, no UI.
-- Searchable memory, not a transcript. Brain keeps what you ask it to keep and says so when it holds nothing.
+- One person's memory across that person's hosts. No team accounts, no injection, no UI.
+- Searchable memory, not a transcript: what you ask it to keep, found by search, and nothing else.
 
-Contributors and agents should start with [`AGENTS.md`](AGENTS.md) for repo rules and the traps each edit can
-hit.
-
-## Reference
-
-### Tools
+## Tools
 
 | Tool | Args | Returns |
 |---|---|---|
@@ -206,13 +176,9 @@ hit.
 | `brain_unlearn` | `id` without the `r`, `confirm: string` copied from that rule | `retired · 3 of 12` |
 | `brain_export` | none | Every note and rule, retired rows included, as JSON |
 
-Search ranks
-on SQLite FTS5 with `bm25()`, matches note tags and rule tags as well as text, and ORs the words in a
-question. Notes and rules are two queries with their own limits, never one merged ranking, because short rules
-would outscore long notes and take their slots. A repeated write is detected by a hash of its own arguments,
-so a retry after an eviction changes nothing. An empty `brain_recall` is final, so a host asks you instead of
-dumping every row into the conversation with `brain_export`, which is for backups and audits. The emptiness
-counts both kinds: a query that finds a rule and no notes is not a miss.
+Search runs on SQLite FTS5 with `bm25()`, and notes and rules are two queries with their own limits, never
+one merged ranking, because short rules would outscore long notes. An empty `brain_recall` is final, so a
+host asks you instead of dumping every row into the conversation; `brain_export` is for backups and audits.
 
 ### Caps
 
