@@ -46,7 +46,7 @@ export const percent = (used: number, limit: number) =>
 const INVISIBLE =
   /[\u0000-\u001F\u007F-\u009F\u00A0\u2000-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\uFEFF]/g;
 const TAG_GAP = /[\s,]+/;
-const TAG_NEAR = 2;
+const MAX_TAG_EDITS = 2;
 export function flat(text: string): string {
   return text.replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
 }
@@ -71,8 +71,8 @@ export function toFtsQuery(raw: string): string {
   return words.join(" OR ");
 }
 
-function withinGap(a: string, b: string, limit: number): boolean {
-  if (Math.abs(a.length - b.length) > limit) return false;
+function boundedEdits(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i += 1) {
     const current = [i];
@@ -83,17 +83,25 @@ function withinGap(a: string, b: string, limit: number): boolean {
       current.push(value);
       if (value < best) best = value;
     }
-    if (best > limit) return false;
+    if (best > limit) return limit + 1;
     previous = current;
   }
-  return (previous[b.length] ?? 0) <= limit;
+  const edits = previous[b.length] ?? limit + 1;
+  return edits > limit ? limit + 1 : edits;
+}
+
+function nearestMatch(wanted: string, stored: string[]): string | undefined {
+  const ranked = stored
+    .filter((candidate) => candidate !== wanted)
+    .map((candidate) => ({ candidate, edits: boundedEdits(wanted, candidate, MAX_TAG_EDITS) }))
+    .filter((match) => match.edits <= MAX_TAG_EDITS)
+    .sort((left, right) => left.edits - right.edits || left.candidate.localeCompare(right.candidate));
+  return ranked[0]?.candidate;
 }
 
 export function nearDuplicates(stored: string[], wanted: string[]): string[] {
   if (wanted.length === 0) return [];
-  return wanted
-    .map((tag) => stored.find((candidate) => candidate !== tag && withinGap(tag, candidate, TAG_NEAR)))
-    .filter((match): match is string => match !== undefined);
+  return wanted.map((tag) => nearestMatch(tag, stored)).filter((match): match is string => match !== undefined);
 }
 
 const NOTE_SELECT = `SELECT notes.id AS id, notes.tier AS tier, notes.at AS storedAt,
