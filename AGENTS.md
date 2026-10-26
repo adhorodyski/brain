@@ -11,7 +11,7 @@ nothing else.
 | `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the recall assembly that puts facts and rules in one response |
 | `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that turns a reply into a result. The only place a tool is defined |
 | `src/store.ts` | All note SQL: the note cap, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
-| `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by identical wording, tombstones, the matching query, and the authority paragraph |
+| `src/rules.ts` | Rule rows: the rule-length and content gates, the required topics, supersede by identical wording, tombstones, the matching query, and the authority paragraph |
 | `src/env.d.ts` | `Env` |
 
 ## Rules
@@ -22,7 +22,7 @@ none are needed. Prose belongs in the README.
 **Nothing beyond the README's feature table earns a place.** No test runner, no reminders, alarms or queues,
 no web fetch, no model call, no transcript, no second user or per-row ownership, no vector search, no UI.
 
-**Two runtime deps**, `@modelcontextprotocol/server` and `zod`, and no `nodejs_compat`. Nothing from pi.
+**No `nodejs_compat`. Nothing from pi.**
 
 **Greenfield.** `SCHEMA` in `brain.ts` creates the final shape. No `migrate()`, `ALTER`, column guard, flag,
 legacy name or default value for a dropped column. If a change seems to need one, stop and ask. Every
@@ -48,14 +48,15 @@ Each of these has a plausible-looking edit that breaks it quietly.
 - Nothing is injected. There is no standing block, and no tool result carries rules the query did not earn.
   The authority paragraph rides only under a non-empty `instructions` section, and the `brain_learn` nudge
   lives there too. Re-adding a block to every result looks like a small robustness win and is what this
-  product deleted: 619 characters per call, dropped by compaction, and demonstrably ignored while present.
+  product deleted: it rode on every call whatever the call was about, compaction dropped it, and it was
+  demonstrably ignored while present.
 
 - `fill()` is built **after** the insert. Build it before and `brain_learn` reports a count from before its
   own row existed.
 
 - `recall` runs two SELECTs with their own limits and concatenates them. Do not UNION the tables into one
-  ranked list. BM25 divides by document length at `b` 0.75 and the tags column carries 5x weight, so the
-  90-character rules would outscore the 300-character facts and take slots from the garage note. Keep
+  ranked list. BM25 divides by document length and the tags column is weighted above the text column, so the
+  one-sentence rules would outscore the long notes and take slots from the garage note. Keep
   `rules_ft` separate even though it holds the same two column shapes.
 
 - `rules.match` filters `active = 1` in SQL. Drop the predicate and a retired rule keeps matching searches,
@@ -99,8 +100,6 @@ npm run check
 npx wrangler deploy --dry-run
 ```
 
-The dry-run bundles at 217 KiB gzipped. Tens more means a dependency crept in.
-
 Then against `wrangler dev`, with a real `pi` client for the tools and `curl` for the rest: with the
 `access.dev` block removed `/mcp` gives 403 `Access required` and not 500; against the deployed Worker, an
 unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from this Worker; a query of `4417`
@@ -114,7 +113,7 @@ A query holding only a rule's own words returns that rule under `instructions` w
 under it. And no tool result mentions a rule it did not match: `brain_patch`, `brain_forget`, `brain_remember`
 and `brain_export` return only their own line, and `brain_recall` of a fact-only query carries no authority
 paragraph. Grep the raw output for `Standing instructions` and for `outrank` rather than reading it, because
-a restored footer reads fine and costs 619 characters a call.
+a restored footer reads fine and charges every turn for rules the turn did not ask for.
 
 Supersede gets its own three-write check, because the failure is silent and the answer text looks healthy.
 Store three rules with different wording that all carry the topic `coding`: all three must come back from a
