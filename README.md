@@ -2,8 +2,8 @@
 
 # Brain
 
-**One durable memory for every coding agent you run.**
-Notes and rules over MCP, on one Cloudflare Worker, on the free tier.
+**One durable memory for all your agents.**
+Notes and rules over MCP, on one Cloudflare Worker, even with a free tier.
 
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
