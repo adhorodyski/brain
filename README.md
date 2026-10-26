@@ -53,7 +53,7 @@ you: add a test for the garage parser
   → brain_recall  query:"add a test for the garage parser"
 
     facts
-    #2 · [note] · stored 2026-10-25 · this repo runs tests with npx tsx --test using node:test #testing
+    #2 · stored 2026-10-25 · this repo runs tests with npx tsx --test using node:test #testing
 
     instructions
     r#3 · Never write tautological tests: an assertion that only restates the implementation can never fail.
@@ -102,15 +102,15 @@ policy — no redeploy, nothing to rotate.
 
 | Tool | Args | Returns |
 |---|---|---|
-| `brain_recall` | `query`, `limit?` | A `facts` block of ranked `#id · [tier] · stored <date> · text #tags` with `## Related` tag neighbours, then an `instructions` block of matching rules with the authority paragraph under them |
-| `brain_remember` | `items[] { text, tags?: string of topic words, tier? }` | `stored #7 · core 612/3150 (19%)`, or `stored · again, same call` for a repeat |
+| `brain_recall` | `query`, `limit?` | A `facts` block of ranked `#id · stored <date> · text #tags` with `## Related` tag neighbours, then an `instructions` block of matching rules with the authority paragraph under them |
+| `brain_remember` | `items[] { text, tags?: string of topic words }` | `stored #7`, or `stored · again, same call` for a repeat |
 | `brain_patch` | `id`, `confirm: string` copied from that note, `text` | `patched #7` |
 | `brain_forget` | `id`, `confirm: string` copied from that note | `forgot #7` |
 | `brain_learn` | `text`, `topics: string of words a search will use` | `stored · 5 of 13 · superseded r#3` |
 | `brain_unlearn` | `id` without the `r`, `confirm: string` copied from that rule | `retired · 3 of 12` |
 | `brain_export` | none | Every note and instruction, retired rows included, as JSON |
 
-`tier` is `note` (free, searchable) or `core` (a small set that costs tokens on every request). Search ranks
+Search ranks
 on SQLite FTS5 with `bm25()`, matches note tags and rule topics as well as text, and ORs the words in a
 question. Facts and rules are two queries with their own limits, never one merged ranking, because short rules
 would outscore long facts and take their slots. A repeated write is detected by a hash of its own arguments,
@@ -120,12 +120,10 @@ counts both kinds: a query that finds a rule and no facts is not a miss.
 
 ## Budgets
 
-`CORE_TOKENS` (900) caps the `core` tier of notes, and `MAX_NOTE` (300) caps one note. Budgets count tokens
-and print characters at `tokens × 3.5`; an over-budget write throws and names the overage, and nothing
-truncates. `learn` caps a rule at 200 characters and refuses one carrying a link, an email or a code fence,
-because a rule should state behaviour and not point somewhere else. Rules are otherwise uncapped: an
-instruction costs tokens only on the turns that retrieve it, so the reason for a standing budget went away
-when the standing block did.
+`MAX_NOTE` (300) caps one note; an over-budget write throws and names the overage, and nothing truncates.
+`learn` caps a rule at 200 characters and refuses one carrying a link, an email or a code fence,
+because a rule should state behaviour and not point somewhere else. Notes and rules are otherwise uncapped:
+both cost tokens only on the turns that retrieve them.
 
 `BRAIN_HOSTNAME` must name the hostname you serve, and the `workers.dev` URL counts as one. The host check
 only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
