@@ -17,7 +17,6 @@ export interface Reply {
 
 export interface Counts {
   notes: number;
-  core: number;
   activeInstructions: number;
   allInstructions: number;
 }
@@ -36,12 +35,10 @@ const SCHEMA = [
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
     text   TEXT NOT NULL,
     tags   TEXT NOT NULL DEFAULT '',
-    tier   TEXT NOT NULL DEFAULT 'note',
     at     TEXT NOT NULL,
     dkey   TEXT UNIQUE
   )`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS notes_ft USING fts5(text, tags, content='notes', content_rowid='rowid')`,
-  `CREATE INDEX IF NOT EXISTS notes_tier ON notes(tier)`,
   `CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
     INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
   END`,
@@ -92,7 +89,6 @@ export const maxNoteFrom = (env: Env) => wholeNumberFrom(env.MAX_NOTE, 300);
 const noteRow = (row: NoteExportRow) => ({
   id: row.id,
   text: row.text,
-  tier: row.tier,
   tags: row.tags,
   storedAt: row.storedAt,
 });
@@ -122,10 +118,7 @@ export class Brain extends DurableObject<Env> {
       },
     };
 
-    this.notes = createNoteStore(port, {
-      coreTokens: wholeNumberFrom(env.CORE_TOKENS, 900),
-      maxNote: maxNoteFrom(env),
-    });
+    this.notes = createNoteStore(port, maxNoteFrom(env));
     this.rules = createRuleStore(port);
     this.ensureSchema();
   }
@@ -185,12 +178,11 @@ export class Brain extends DurableObject<Env> {
   async export(): Promise<ExportReply> {
     const notes = this.notes.notes();
     const rules = this.rules.rules();
-    const core = notes.filter((row) => row.tier === "core").length;
     const active = rules.filter((row) => row.active === 1).length;
     return {
       notes: notes.map(noteRow),
       instructions: rules.map(ruleRow),
-      counts: { notes: notes.length, core, activeInstructions: active, allInstructions: rules.length },
+      counts: { notes: notes.length, activeInstructions: active, allInstructions: rules.length },
     };
   }
 }

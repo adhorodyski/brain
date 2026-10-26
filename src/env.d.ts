@@ -5,7 +5,6 @@ declare global {
     Brain: DurableObjectNamespace<import("./brain").Brain>;
 
     BRAIN_HOSTNAME?: string;
-    CORE_TOKENS?: string;
     MAX_NOTE?: string;
   }
 }

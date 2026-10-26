@@ -10,7 +10,7 @@ nothing else.
 | `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, Cloudflare Access identity guard |
 | `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the recall assembly that puts facts and rules in one response |
 | `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that turns a reply into a result. The only place a tool is defined |
-| `src/store.ts` | All note SQL: budgets, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
+| `src/store.ts` | All note SQL: the note cap, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
 | `src/rules.ts` | Rule rows: the 200-character gate, the required topics, supersede by identical wording, tombstones, the matching query, and the authority paragraph |
 | `src/env.d.ts` | `Env` |
 
@@ -106,8 +106,8 @@ Then against `wrangler dev`, with a real `pi` client for the tools and `curl` fo
 unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from this Worker; a query of `4417`
 ranks the garage note first; `"`, `((x`, a lone backslash, `"OR"` and a blank query never raise `fts5: syntax
 error`; a near-miss tag echoes the stored one, and so does a near-miss topic; the same write twice returns
-`again, same call` with one row; a retired rule stops matching searches but stays in `export`; a `core` write
-over budget throws and stores nothing.
+`again, same call` with one row; a retired rule stops matching searches but stays in `export`; a note over
+`MAX_NOTE` throws and stores nothing.
 
 Two checks belong to the pull-only design and neither has a plausible-looking edit that keeps it passing.
 A query holding only a rule's own words returns that rule under `instructions` with the authority paragraph

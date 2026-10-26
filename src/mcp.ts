@@ -24,12 +24,6 @@ const noteItem = (maxNote: number) =>
       .string()
       .optional()
       .describe("Topic words only, space or comma separated. No dates and no names of people."),
-    tier: z
-      .union([z.literal("note"), z.literal("core")])
-      .optional()
-      .describe(
-        "core is a small budgeted set that costs tokens on every future request; note is uncapped and reachable only by searching. Default note.",
-      ),
   });
 
 const exportShape = z.object({
@@ -38,7 +32,6 @@ const exportShape = z.object({
       id: z.number(),
       text: z.string(),
       tags: z.string(),
-      tier: z.string(),
       storedAt: z.string(),
     }),
   ),
@@ -54,7 +47,6 @@ const exportShape = z.object({
   ),
   counts: z.object({
     notes: z.number(),
-    core: z.number(),
     activeInstructions: z.number(),
     allInstructions: z.number(),
   }),
@@ -97,9 +89,7 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
     },
     async ({ items }) =>
       brain
-        .remember(
-          items.map((item) => ({ text: item.text, tags: item.tags ?? "", tier: item.tier ?? "note" })),
-        )
+        .remember(items.map((item) => ({ text: item.text, tags: item.tags ?? "" })))
         .then(spoken),
   );
 
