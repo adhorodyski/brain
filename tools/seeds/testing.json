@@ -1,0 +1,9 @@
+{
+  "notes": [
+    { "text": "This repo runs tests with npx tsx --test using node:test", "tags": "testing setup" }
+  ],
+  "rules": [
+    { "text": "Never write tautological tests: an assertion that only restates the implementation can never fail", "tags": "testing" },
+    { "text": "No comments in this repo, not line, block, or JSDoc", "tags": "coding style" }
+  ]
+}
