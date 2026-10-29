@@ -117,6 +117,9 @@ for (const [index, prompt] of prompts.entries()) {
     unprompted += calls > 0 ? 1 : 0;
     writeFileSync(join(results, `run-${index + 1}.jsonl`), transcript);
     console.log(`run ${index + 1} of ${prompts.length}: ${calls} brain calls`);
+  } catch (error) {
+    console.error(`eval stopped: ${error.message}`);
+    process.exit(1);
   } finally {
     child.kill("SIGTERM");
     rmSync(stateDir, { recursive: true, force: true });
