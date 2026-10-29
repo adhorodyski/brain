@@ -22,6 +22,11 @@ none are needed. Prose belongs in the README.
 **Nothing beyond the README's feature table earns a place.** No test runner, no reminders, alarms or queues,
 no web fetch, no model call, no transcript, no second user or per-row ownership, no vector search, no UI.
 
+**`tools/` is the one exception, and it is not product.** It holds the two scripts the Checks section names:
+a protocol probe and an eval that counts unprompted `brain_recall` calls through a real host. Plain node
+scripts on the committed MCP client, no test runner, nothing `src/` imports, and result files are committed
+so a wording change carries its own before/after.
+
 **No `nodejs_compat`. Nothing from pi.**
 
 **Greenfield.** `SCHEMA` in `brain.ts` creates the final shape. No `migrate()`, `ALTER`, column guard, flag,
@@ -98,7 +103,14 @@ Each of these has a plausible-looking edit that breaks it quietly.
 ```sh
 npm run check
 npx wrangler deploy --dry-run
+node tools/protocol-check.mjs
 ```
+
+`tools/protocol-check.mjs` is the tracked version of the probe: it starts `wrangler dev` against a fresh
+state dir and exercises every tool over the wire, so the named checks below are re-runnable from a clean
+clone instead of living in an excluded file. Run it with node, not bun: wrangler cannot forward requests
+under bun. `node tools/eval.mjs --class testing` drives the pi half over the committed prompts and writes
+its transcripts under `tools/results/`.
 
 Then against `wrangler dev`, with a real `pi` client for the tools and `curl` for the rest: with the
 `access.dev` block removed `/mcp` gives 403 `Access required` and not 500; against the deployed Worker, an
