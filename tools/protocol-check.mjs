@@ -1,269 +1,191 @@
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { startDevServer } from "./dev-server.mjs";
 
 const PORT = Number(process.env.PROBE_PORT ?? 8899);
-const MCP_URL = `http://127.0.0.1:${PORT}/mcp`;
-const DEV_BOOT_MS = 90_000;
-const CALL_TIMEOUT_MS = 30_000;
 
-if (process.versions.bun) {
-  console.error("run this with node: wrangler dev cannot forward requests under bun (bun#39247)");
-  process.exit(1);
-}
+let passed = 0;
+const failures = [];
 
-const wranglerCli = new URL("../node_modules/wrangler/wrangler-dist/cli.js", import.meta.url);
-
-function startDevServer(stateDir) {
-  const child = spawn(process.execPath, [wranglerCli.pathname, "dev", "--ip", "127.0.0.1", "--port", String(PORT), "--persist-to", stateDir, "--log-level", "none"], {
-    cwd: new URL("..", import.meta.url).pathname,
-    stdio: "ignore",
-  });
-  child.on("error", (error) => {
-    console.error(`wrangler failed to start: ${error.message}`);
-    process.exit(1);
-  });
-  return child;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForHealth() {
-  const deadline = Date.now() + DEV_BOOT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const reply = await fetch(`http://127.0.0.1:${PORT}/health`);
-      if (reply.ok) return;
-    } catch {}
-    await sleep(500);
-  }
-  throw new Error(`the dev server never answered /health within ${DEV_BOOT_MS / 1000}s`);
-}
-
-function withDeadline(promise, what) {
-  let timer;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${what} timed out after ${CALL_TIMEOUT_MS / 1000}s`)), CALL_TIMEOUT_MS);
-    }),
-  ]);
-}
-
-class Probe {
-  constructor() {
-    this.passed = 0;
-    this.failures = [];
-  }
-
-  report(name, ok, detail) {
-    if (ok) {
-      this.passed += 1;
-      console.log(`ok   ${name}`);
-    } else {
-      this.failures.push(name);
-      console.log(`FAIL ${name}${detail ? `\n     ${detail}` : ""}`);
-    }
-  }
-
-  says(name, actual, expected, detail = `actual: ${JSON.stringify(actual)}`) {
-    this.report(name, actual.includes(expected), detail);
-  }
-
-  silent(name, actual, fragment) {
-    this.report(name, !actual.includes(fragment), `actual: ${JSON.stringify(actual)} mentions ${JSON.stringify(fragment)}`);
-  }
-
-  count(name, actual, expected) {
-    this.report(name, actual === expected, `actual: ${actual} expected: ${expected}`);
-  }
-
-  truthy(name, actual) {
-    this.report(name, actual === true, `actual: ${actual}`);
+function check(name, ok, actual) {
+  if (ok) {
+    passed += 1;
+    console.log(`ok   ${name}`);
+  } else {
+    failures.push(name);
+    console.log(`FAIL ${name}\n     actual: ${JSON.stringify(actual)}`);
   }
 }
 
-async function call(client, name, args) {
-  const result = await withDeadline(client.callTool({ name, arguments: args }), name);
+function answers(checkName, text, expected) {
+  check(checkName, text.includes(expected), text);
+}
+
+function staysOut(checkName, text, fragment) {
+  check(checkName, !text.includes(fragment), `${text} mentions ${fragment}`);
+}
+
+async function refused(checkName, attempt) {
+  check(checkName, await attempt().then(() => false, () => true), "the call was accepted");
+}
+
+const connect = async () => {
+  const client = new Client({ name: "protocol-check", version: "0" }, { capabilities: {} });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`)));
+  return client;
+};
+
+async function call(client, name, args = {}) {
+  const result = await client.callTool({ name, arguments: args });
   const text = (result.content ?? []).map((part) => part.text ?? "").join("\n");
-  if (result.isError) throw new Error(`${name} answered as an error: ${text}`);
+  if (result.isError) throw new Error(text);
   return text;
 }
 
-async function refused(probe, name, fn) {
-  try {
-    const text = await fn();
-    probe.report(name, false, `no error; the call answered ${JSON.stringify(text)}`);
-  } catch {
-    probe.report(name, true);
-  }
-}
+const noteIdFrom = (text) => Number(text.match(/#(\d+)/)[1]);
 
-async function connect() {
-  const client = new Client({ name: "protocol-check", version: "0" }, { capabilities: {} });
-  await withDeadline(client.connect(new StreamableHTTPClientTransport(new URL(MCP_URL))), "the MCP handshake");
-  return client;
-}
+const checks = {
+  "the 4417 ranking": async (client) => {
+    await call(client, "brain_remember", {
+      items: [
+        { text: "The garage door code is 4417", tags: "home code" },
+        { text: "The meeting room booking for 4417 was cancelled", tags: "work" },
+      ],
+    });
+    const found = await call(client, "brain_recall", { query: "4417" });
+    check("a query of 4417 ranks the garage note first", found.indexOf("garage") >= 0 && found.indexOf("garage") < found.indexOf("meeting"), found);
+  },
 
-async function ranked(client, probe) {
-  await call(client, "brain_remember", {
-    items: [
-      { text: "The garage door code is 4417", tags: "home code" },
-      { text: "The meeting room booking for 4417 was cancelled", tags: "work" },
-    ],
-  });
-  const first = await call(client, "brain_recall", { query: "4417" });
-  const garageFirst = first.indexOf("garage") >= 0 && first.indexOf("garage") < first.indexOf("meeting");
-  probe.report("a query of 4417 ranks the garage note first", garageFirst, `actual: ${JSON.stringify(first)}`);
-}
+  "the syntax guard": async (client) => {
+    for (const query of ['"', "((x", "\\", '"OR"', "  ", ""]) {
+      staysOut(`query ${JSON.stringify(query)} raises no fts5 syntax error`, await call(client, "brain_recall", { query }), "fts5: syntax error");
+    }
+  },
 
-async function syntaxGuard(client, probe) {
-  for (const query of ['"', "((x", "\\", '"OR"', "  ", ""]) {
-    const text = await call(client, "brain_recall", { query });
-    probe.silent(`query ${JSON.stringify(query)} does not raise an fts5 syntax error`, text, "fts5: syntax error");
-  }
-}
+  "tag convergence": async (client) => {
+    await call(client, "brain_remember", { items: [{ text: "The mailbox collection is at noon", tags: "noon" }] });
+    answers(
+      "a near-miss tag in notes echoes the stored tag",
+      await call(client, "brain_remember", { items: [{ text: "Bin day is Tuesday morning", tags: "novn" }] }),
+      'existing tag: "noon"',
+    );
 
-async function tagConvergence(client, probe) {
-  await call(client, "brain_remember", { items: [{ text: "The mailbox collection is at noon", tags: "noon" }] });
-  const echo = await call(client, "brain_remember", { items: [{ text: "Bin day is Tuesday morning", tags: "novn" }] });
-  probe.says("a near-miss tag in notes echoes the stored tag", echo, 'existing tag: "noon"');
+    await call(client, "brain_learn", { text: "Never use em dashes in replies to the owner", tags: "dashes" });
+    answers(
+      "a near-miss tag in rules echoes the stored tag",
+      await call(client, "brain_learn", { text: "Keep replies free of decorative punctuation", tags: "dashe" }),
+      'existing tag: "dashes"',
+    );
 
-  await call(client, "brain_learn", { text: "Never use em dashes in replies to the owner", tags: "dashes" });
-  const echoRule = await call(client, "brain_learn", { text: "Keep replies free of decorative punctuation", tags: "dashe" });
-  probe.says("a near-miss tag in rules echoes the stored tag", echoRule, 'existing tag: "dashes"');
+    staysOut(
+      "a distant tag echoes nothing",
+      await call(client, "brain_learn", { text: "Commit messages use the imperative mood", tags: "commits" }),
+      "existing tag",
+    );
+  },
 
-  const distant = await call(client, "brain_learn", { text: "Commit messages use the imperative mood", tags: "commits" });
-  probe.silent("a distant tag echoes nothing", distant, "existing tag");
-}
+  "write dedupe": async (client) => {
+    const note = { text: "The wifi password is sunset-lagoon", tags: "home wifi" };
+    await call(client, "brain_remember", { items: [note] });
+    answers("the same write twice reports again, same call", await call(client, "brain_remember", { items: [note] }), "(again, same call)");
+    const exportText = await call(client, "brain_export", {});
+    check("the repeated write stored one row", exportText.split("sunset-lagoon").length === 2, exportText);
+  },
 
-async function dedupe(client, probe) {
-  const note = { text: "The wifi password is sunset-lagoon", tags: "home wifi" };
-  const first = await call(client, "brain_remember", { items: [note] });
-  const again = await call(client, "brain_remember", { items: [note] });
-  probe.says("the same write twice reports again, same call", again, "(again, same call)");
-  const exported = await structuredExport(client);
-  const id = Number(first.match(/#(\d+)/)[1]);
-  probe.count("the repeated write stored one row", exported.notes.filter((row) => row.id === id).length, 1);
-}
+  "supersede by wording": async (client) => {
+    const sharedTag = { text: "Prefer table-driven tests over one test per case", tags: "coding" };
+    await call(client, "brain_learn", sharedTag);
+    await call(client, "brain_learn", { text: "Name the behaviour in the test title", tags: "coding" });
+    await call(client, "brain_learn", { text: "Never mock a class the module does not own", tags: "coding" });
 
-async function structuredExport(client) {
-  const result = await withDeadline(client.callTool({ name: "brain_export", arguments: {} }), "brain_export");
-  const payload = result.structuredContent ?? JSON.parse(result.content[0].text);
-  return typeof payload === "string" ? JSON.parse(payload) : payload;
-}
+    const found = await call(client, "brain_recall", { query: "coding" });
+    check("three rules sharing a tag all come back", ["table-driven", "test title", "does not own"].every((words) => found.includes(words)), found);
 
-async function supersede(client, probe) {
-  const a = { text: "Prefer table-driven tests over one test per case", tags: "coding" };
-  const b = { text: "Name the behaviour in the test title", tags: "coding" };
-  const c = { text: "Never mock a class the module does not own", tags: "coding" };
-  const written = [];
-  for (const rule of [a, b, c]) written.push(await call(client, "brain_learn", rule));
-  probe.truthy("three rules sharing a tag all store", written.every((line) => line.startsWith("stored")) && !written.some((line) => line.includes("superseded")));
+    const firstId = Number(found.split("\n").find((line) => line.includes("table-driven")).match(/r#(\d+)/)[1]);
+    const again = await call(client, "brain_learn", { text: sharedTag.text, tags: "testing style" });
+    answers("the same wording with new tags supersedes that rule", again, `superseded r#${firstId}`);
 
-  const found = await call(client, "brain_recall", { query: "coding" });
-  probe.truthy("all three come back from a coding query", ["table-driven", "test title", "does not own"].every((word) => found.includes(word)));
+    const after = await call(client, "brain_recall", { query: "coding" });
+    check("the two other rules stay active", after.includes("test title") && after.includes("does not own"), after);
+    staysOut("the superseded rule stops matching searches", after, "table-driven");
+    answers("the superseded rule stays in the export", await call(client, "brain_export", {}), "table-driven");
+  },
 
-  const firstId = Number(found.split("\n").find((line) => line.includes("table-driven")).match(/r#(\d+)/)[1]);
-  const superseded = await call(client, "brain_learn", { text: a.text, tags: "testing style" });
-  probe.says("the same wording with new tags supersedes that rule", superseded, `superseded r#${firstId}`);
-  probe.count("the supersede retires exactly one rule", (superseded.match(/superseded/g) ?? []).length, 1);
+  "no authority without a matched rule": async (client) => {
+    await call(client, "brain_remember", { items: [{ text: "The studio key is under the fern", tags: "home key" }] });
+    staysOut("a note-only recall carries no authority paragraph", await call(client, "brain_recall", { query: "studio fern" }), "outrank");
+    staysOut("a note write mentions no rule", await call(client, "brain_remember", { items: [{ text: "The bin collector's name is Sam", tags: "home people" }] }), "outrank");
+  },
 
-  const after = await call(client, "brain_recall", { query: "coding" });
-  probe.truthy("the two other rules stay active", after.includes("test title") && after.includes("does not own"));
-  probe.silent("the superseded rule stops matching searches", after, "table-driven");
-  probe.says("the superseded rule stays in the export", await call(client, "brain_export", {}), "table-driven");
+  "the caps": async (client) => {
+    const long = "x".repeat(301);
+    await refused("a note over the cap is refused", () => call(client, "brain_remember", { items: [{ text: long, tags: "cap" }] }));
+    staysOut("the over-long note stored nothing", await call(client, "brain_export", {}), long);
+    await refused("a rule carrying a link is refused", () => call(client, "brain_learn", { text: "The wiki is at https://example.com/page", tags: "links" }));
+    await refused("a rule without tags is refused", () => call(client, "brain_learn", { text: "Write short rules", tags: "" }));
+  },
 
-  const retry = await call(client, "brain_remember", { items: [{ text: "The shed door code is 9 0 2 1", tags: "home code" }] });
-  probe.truthy("an unrelated write still stores", retry.startsWith("stored #"));
-}
+  "the confirm guard": async (client) => {
+    const stored = await call(client, "brain_remember", { items: [{ text: "The router admin password is heron-42", tags: "home network" }] });
+    const id = noteIdFrom(stored);
+    await refused("a patch whose confirm is not in the note is refused", () => call(client, "brain_patch", { id, confirm: "wrong fragment", text: "The router admin password is heron-43" }));
+    answers("a patch with a real fragment works", await call(client, "brain_patch", { id, confirm: "heron-42", text: "The router admin password is heron-43" }), `patched #${id}`);
+    await refused("a forget whose confirm is not in the note is refused", () => call(client, "brain_forget", { id, confirm: "wrong fragment" }));
+    answers("a forget with a real fragment works", await call(client, "brain_forget", { id, confirm: "heron-43" }), `forgot #${id}`);
+  },
 
-async function authorityOnlyWithRules(client, probe) {
-  await call(client, "brain_remember", { items: [{ text: "The studio key is under the fern", tags: "home key" }] });
-  probe.silent("a note-only recall carries no authority paragraph", await call(client, "brain_recall", { query: "studio fern" }), "outrank");
-  probe.silent("brain_remember mentions no rule", await call(client, "brain_remember", { items: [{ text: "The bin collector's name is Sam", tags: "home people" }] }), "outrank");
-  probe.silent("brain_patch mentions no rule", await call(client, "brain_patch", { id: 1, confirm: "garage", text: "The garage door code is 4417 today" }), "outrank");
-}
+  "retirement": async (client) => {
+    await call(client, "brain_learn", { text: "Always open a changelog with its date", tags: "changelog" });
+    const id = Number((await call(client, "brain_recall", { query: "changelog" })).match(/r#(\d+)/)[1]);
+    answers("a retired rule answers retired", await call(client, "brain_unlearn", { id, confirm: "open a changelog" }), "retired");
+    staysOut("a retired rule stops matching searches", await call(client, "brain_recall", { query: "changelog" }), "Always open a changelog");
+    answers("a retired rule stays in the export", await call(client, "brain_export", {}), "Always open a changelog");
+  },
 
-async function caps(client, probe) {
-  const long = "x".repeat(301);
-  await refused(probe, "a note over the cap is refused", () => call(client, "brain_remember", { items: [{ text: long, tags: "cap" }] }));
-  const exported = await call(client, "brain_export", {});
-  probe.silent("the over-long note stored nothing", exported, long);
+  "the host guard": async () => {
+    const foreign = await rawRequest("evil.example.com");
+    check("a foreign Host header gets 403", foreign.startsWith("HTTP/1.1 403"), foreign.split("\r\n")[0]);
+    const local = await rawRequest(`127.0.0.1:${PORT}`);
+    check("the dev host is not refused", !local.startsWith("HTTP/1.1 403"), local.split("\r\n")[0]);
+  },
+};
 
-  await refused(probe, "a rule carrying a link is refused", () => call(client, "brain_learn", { text: "The wiki is at https://example.com/page", tags: "links" }));
-  await refused(probe, "a rule without tags is refused", () => call(client, "brain_learn", { text: "Write short rules", tags: "" }));
-}
-
-async function confirmGuard(client, probe) {
-  const stored = await call(client, "brain_remember", { items: [{ text: "The router admin password is heron-42", tags: "home network" }] });
-  const id = Number(stored.match(/#(\d+)/)[1]);
-  await refused(probe, "a patch whose confirm is not in the note is refused", () => call(client, "brain_patch", { id, confirm: "wrong fragment", text: "The router admin password is heron-43" }));
-  probe.says("a patch with a real fragment works", await call(client, "brain_patch", { id, confirm: "heron-42", text: "The router admin password is heron-43" }), `patched #${id}`);
-  await refused(probe, "a forget whose confirm is not in the note is refused", () => call(client, "brain_forget", { id, confirm: "wrong fragment" }));
-  probe.says("a forget with a real fragment works", await call(client, "brain_forget", { id, confirm: "heron-43" }), `forgot #${id}`);
-}
-
-async function retirement(client, probe) {
-  await call(client, "brain_learn", { text: "Always open a changelog with its date", tags: "changelog" });
-  const id = Number((await call(client, "brain_recall", { query: "changelog" })).match(/r#(\d+)/)[1]);
-  probe.says("a retired rule answers retired", await call(client, "brain_unlearn", { id, confirm: "open a changelog" }), "retired");
-  probe.silent("a retired rule stops matching searches", await call(client, "brain_recall", { query: "changelog" }), "Always open a changelog");
-  probe.says("a retired rule stays in the export", await call(client, "brain_export", {}), "Always open a changelog");
-}
-
-function rawRequest(host, path) {
+function rawRequest(host) {
   const body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}';
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: "127.0.0.1", port: PORT }, () => {
-      socket.end(
-        `POST ${path} HTTP/1.1\r\nHost: ${host}\r\ncontent-type: application/json\r\naccept: application/json, text/event-stream\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`,
-      );
+      socket.end(`POST /mcp HTTP/1.1\r\nHost: ${host}\r\ncontent-type: application/json\r\naccept: application/json, text/event-stream\r\ncontent-length: ${body.length}\r\nconnection: close\r\n\r\n${body}`);
     });
-    let body = "";
-    socket.on("data", (chunk) => (body += chunk));
-    socket.on("end", () => resolve(body));
+    let response = "";
+    socket.on("data", (chunk) => (response += chunk));
+    socket.on("end", () => resolve(response));
     socket.on("error", reject);
   });
 }
 
-async function hostGuard(client, probe) {
-  const refusedHost = await rawRequest("evil.example.com", "/mcp");
-  probe.report("a foreign Host header is refused", refusedHost.startsWith("HTTP/1.1 403"), `actual: ${refusedHost.split("\r\n")[0]}`);
+const stateDir = mkdtempSync(join(tmpdir(), "brain-probe-"));
+const watchdog = setTimeout(() => {
+  console.error("the probe ran past its 5 minute cap and gave up rather than hanging");
+  process.exit(1);
+}, 300_000);
+const { child, ready } = startDevServer(PORT, stateDir);
+process.on("exit", () => {
+  child.kill("SIGTERM");
+  rmSync(stateDir, { recursive: true, force: true });
+});
 
-  const allowedHost = await rawRequest("127.0.0.1:8899", "/mcp");
-  probe.report("the dev host is not refused with 403", !allowedHost.startsWith("HTTP/1.1 403"), `actual: ${allowedHost.split("\r\n")[0]}`);
+try {
+  await ready;
+  const client = await connect();
+  for (const check of Object.values(checks)) await check(client);
+  await client.close();
+} catch (error) {
+  failures.push(error.message);
+  console.error(error.message);
 }
 
-const checks = [ranked, syntaxGuard, tagConvergence, dedupe, supersede, authorityOnlyWithRules, caps, confirmGuard, retirement, hostGuard];
-
-async function main() {
-  const stateDir = mkdtempSync(join(tmpdir(), "brain-protocol-check-"));
-  const server = startDevServer(stateDir);
-  const stop = () => {
-    server.kill("SIGTERM");
-    rmSync(stateDir, { recursive: true, force: true });
-  };
-  process.on("exit", stop);
-
-  const probe = new Probe();
-  try {
-    await waitForHealth();
-    const client = await connect();
-    for (const check of checks) await check(client, probe);
-    await client.close();
-  } finally {
-    stop();
-  }
-
-  console.log(`\n${probe.passed} passed, ${probe.failures.length} failed`);
-  for (const name of probe.failures) console.log(`  ${name}`);
-  process.exit(probe.failures.length === 0 ? 0 : 1);
-}
-
-main();
+console.log(`\n${passed} passed, ${failures.length} failed`);
+process.exit(failures.length === 0 ? 0 : 1);
