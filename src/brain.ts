@@ -9,6 +9,7 @@ import {
   type SqlValue,
 } from "./notes";
 import { createRuleStore, type RuleExportRow } from "./rules";
+import { ensureSchema, SCHEMA } from "./schema";
 
 export interface Reply {
   text: string;
@@ -29,46 +30,6 @@ export interface ExportReply {
   rules: RuleRow[];
   counts: Counts;
 }
-
-const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS notes (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    text   TEXT NOT NULL,
-    tags   TEXT NOT NULL DEFAULT '',
-    at     TEXT NOT NULL,
-    dkey   TEXT UNIQUE
-  )`,
-  `CREATE VIRTUAL TABLE IF NOT EXISTS notes_ft USING fts5(text, tags, content='notes', content_rowid='rowid')`,
-  `CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
-    INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
-    INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-    INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-    INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-  END`,
-  `CREATE TABLE IF NOT EXISTS rules (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    text   TEXT NOT NULL,
-    tags   TEXT NOT NULL,
-    at     TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    dkey   TEXT UNIQUE
-  )`,
-  `CREATE VIRTUAL TABLE IF NOT EXISTS rules_ft USING fts5(text, tags, content='rules', content_rowid='rowid')`,
-  `CREATE TRIGGER IF NOT EXISTS rules_ai AFTER INSERT ON rules BEGIN
-    INSERT INTO rules_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS rules_au AFTER UPDATE ON rules BEGIN
-    INSERT INTO rules_ft(rules_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-    INSERT INTO rules_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS rules_ad AFTER DELETE ON rules BEGIN
-    INSERT INTO rules_ft(rules_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-  END`,
-];
 
 const NOTES_HEADER = "notes";
 const RULES_HEADER = "rules";
@@ -103,6 +64,7 @@ const ruleRow = (row: RuleExportRow) => ({
 export class Brain extends DurableObject<Env> {
   private notes;
   private rules;
+  private schemaError: string | null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -118,23 +80,14 @@ export class Brain extends DurableObject<Env> {
 
     this.notes = createNoteStore(port, maxNoteFrom(env));
     this.rules = createRuleStore(port);
-    this.ensureSchema();
-  }
-
-  private ensureSchema(): void {
-    const built = new Set(
-      [
-        ...this.ctx.storage.sql.exec<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE name IN ('notes', 'rules')",
-        ),
-      ].map((row) => row.name),
-    );
-    if (built.has("notes") && built.has("rules")) return;
-    for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
+    this.schemaError = ensureSchema((statement) => {
+      [...this.ctx.storage.sql.exec(statement)];
+    }, SCHEMA);
   }
 
   private async answer(build: () => string | Promise<string>): Promise<Reply> {
     try {
+      if (this.schemaError) throw new Error(this.schemaError);
       return { text: await build(), failed: false };
     } catch (error) {
       return { text: error instanceof Error ? error.message : String(error), failed: true };
@@ -174,6 +127,7 @@ export class Brain extends DurableObject<Env> {
   }
 
   async export(): Promise<ExportReply> {
+    if (this.schemaError) throw new Error(this.schemaError);
     const notes = this.notes.allNotes();
     const rules = this.rules.allRules();
     const active = rules.filter((row) => row.active === 1).length;
