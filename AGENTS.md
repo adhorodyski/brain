@@ -9,6 +9,7 @@ nothing else.
 |---|---|
 | `src/index.ts` | `GET /health`, `POST /mcp`, host-header guard, Cloudflare Access identity guard |
 | `src/brain.ts` | The Durable Object: schema on init, one method per tool, and the recall assembly that puts notes and rules in one response |
+| `src/schema.ts` | The shape of the database as data: base tables, columns added after them, and the FTS objects, plus `ensureSchema` |
 | `src/mcp.ts` | `McpServer`, the seven tool definitions, descriptions, annotations, and the shared wrapper that turns a reply into a result. The only place a tool is defined |
 | `src/notes.ts` | All note SQL: the note cap, `dkey` dedupe, tag convergence, text flattening, FTS query. No Cloudflare or MCP imports |
 | `src/rules.ts` | Rule rows: the rule-length and content caps, the required tags, supersede by identical wording, the matching query, and the authority paragraph |
@@ -24,11 +25,11 @@ no web fetch, no model call, no transcript, no second user or per-row ownership,
 
 **No `nodejs_compat`. Nothing from pi.**
 
-**Greenfield.** `SCHEMA` in `brain.ts` creates the final shape. No `migrate()`, `ALTER`, column guard, flag,
-legacy name or default value for a dropped column. If a change seems to need one, stop and ask. Every
-statement in `SCHEMA` carries `IF NOT EXISTS`, which is what lets a deployed DO that already has `notes` gain
-`rules` and `rules_ft` without touching its rows. That is the one exception the rule allows, and it is the
-reason `ensureSchema` checks both table names rather than `notes` alone.
+**The shape is data, and it is additive.** `SCHEMA` in `src/schema.ts` is the whole shape: `tables` create it,
+`added` lists columns that arrived after the base, `objects` holds the FTS tables and triggers. `ensureSchema`
+runs all of it on every boot and adds any `added` column the table lacks, so a deployed DO with rows in it
+grows a column without losing them. Nothing drops a column, renames one, or changes the meaning of an existing
+one; `IF NOT EXISTS` stays on every create. If a change seems to need more than an addition, stop and ask.
 
 ## Traps
 
@@ -36,6 +37,12 @@ Each of these has a plausible-looking edit that breaks it quietly.
 
 - Splitting the DDL string on `;` destroys the FTS triggers, which contain semicolons. Statements go through
   `exec()` one at a time. The failure is silent: the worker boots and `recall` returns nothing forever.
+- A column in `added` has to be addable in place. SQLite refuses `ADD COLUMN` for a `NOT NULL` column with no
+  default and for a non-constant default like `CURRENT_TIMESTAMP`. The bar is a `rules` table with rows in it
+  taking the statement, not an empty one.
+- A schema failure must not answer. `ensureSchema` returns a message and `Brain` keeps it; every tool throws it
+  and `export()` throws rather than returning empty rows, which would report a healthy empty brain over a
+  broken one. Swallow the error in the constructor and the DO boots looking fine while every call 500s.
 - The identity guard is `ctx.access?.getIdentity()`, and the `?.` is load-bearing. `ctx.access` is undefined
   whenever Access did not authenticate the invocation — Access switched off, a hostname it does not cover, or
   `wrangler dev` with no `access.dev` block. Drop the `?.` and those requests throw a TypeError and answer 500,
@@ -106,7 +113,9 @@ unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from t
 ranks the garage note first; `"`, `((x`, a lone backslash, `"OR"` and a blank query never raise `fts5: syntax
 error`; a near-miss tag echoes the stored one, in both tables; the same write twice returns
 `again, same call` with one row; a retired rule stops matching searches but stays in `export`; a note over
-`MAX_NOTE` throws and stores nothing.
+`MAX_NOTE` throws and stores nothing. For the schema, put a column in `added` that `create` does not have,
+then boot twice against a `rules` table seeded without it and holding a row: the row survives with the
+column filled, the second boot changes nothing, and `rules_ft` still answers a query.
 
 Two checks belong to the pull-only design and neither has a plausible-looking edit that keeps it passing.
 A query holding only a rule's own words returns that rule under `rules` with the authority paragraph
