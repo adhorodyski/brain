@@ -43,6 +43,16 @@ apply. D1 keeps 30 days of history on paid plans, which is the undo for either.
 
 Each of these has a plausible-looking edit that breaks it quietly.
 
+- **`brain_patch` already defeats dedupe on a note.** It stores `dkey` over the note id and the confirm
+  fragment, so the stored key depends on words that are not in the note. Re-member a patched note's own text
+  and the DO answers `stored #<new id>` and adds a row: measured on `main`, `patched #1` then re-remembering
+  the new text stored `#3`. So an exported `dkey` is not worth preserving, and `export-to-migration.mjs`
+  derives keys from content by default (`notes`: `digest([text, tags])`, `rules`: `digest([tags, text])`,
+  retired rules `NULL`). An import that way *repairs* the patched notes. `--keep-keys` is the only reason to
+  carry the old ones, and `d1_migrations` plus 30 days of history is the undo for either.
+  This is also why an export from a build that predates `dkey` is a complete migration and not a lossy one:
+  both shapes generate the same SQL.
+
 - A migration that touches the search index has to drop and rebuild it, and **`DROP TABLE notes_ft` does not
   drop `notes_ai`, `notes_au` or `notes_ad`, because those triggers are declared `ON notes`.** Drop the
   triggers first or the recreate dies with `trigger notes_ai already exists`. And editing the
