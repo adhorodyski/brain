@@ -1,6 +1,6 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import type { ExportReply, Reply } from "./brain";
+import type { BrainHandle, ExportReply, Reply } from "./brain";
 import { MAX_RULE } from "./rules";
 import type { NoteInput } from "./notes";
 
@@ -33,6 +33,7 @@ const exportShape = z.object({
       text: z.string(),
       tags: z.string(),
       storedAt: z.string(),
+      dkey: z.string().nullable(),
     }),
   ),
   rules: z.array(
@@ -42,6 +43,7 @@ const exportShape = z.object({
       tags: z.string(),
       storedAt: z.string(),
       active: z.boolean(),
+      dkey: z.string().nullable(),
     }),
   ),
   counts: z.object({
@@ -157,7 +159,7 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
     "brain_export",
     {
       title: "Export the brain",
-      description: `Every note and every rule, including retired ones, as JSON, with counts. For backups and audits. Never after brain_recall finds nothing: another query will not find it either, and this dumps every row into the conversation.`,
+      description: `Every note and every rule, including retired ones, as JSON, with counts. Carries each row's id, its stored timestamp, and its dedupe key, so the output re-imports as a migration and restores byte-identically: ids keep their numbers and repeat writes still dedupe. For backups, audits, and moves between storages. Never after brain_recall finds nothing: another query will not find it either, and this dumps every row into the conversation.`,
       outputSchema: exportShape,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },
@@ -169,14 +171,4 @@ export function brainServer(brain: BrainHandle, maxNote: number) {
   );
 
   return server;
-}
-
-export interface BrainHandle {
-  recall(query: string, limit: number): Promise<Reply>;
-  remember(items: NoteInput[]): Promise<Reply>;
-  patch(id: number, confirm: string, text: string): Promise<Reply>;
-  forget(id: number, confirm: string): Promise<Reply>;
-  learn(text: string, tags: string): Promise<Reply>;
-  unlearn(id: number, confirm: string): Promise<Reply>;
-  export(): Promise<ExportReply>;
 }

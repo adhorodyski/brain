@@ -1,13 +1,5 @@
-import { DurableObject } from "cloudflare:workers";
-import {
-  createNoteStore,
-  noMatchLine,
-  type NoteExportRow,
-  type NoteInput,
-  type SqlPort,
-  type SqlRow,
-  type SqlValue,
-} from "./notes";
+import { createD1Port } from "./db";
+import { createNoteStore, noMatchLine, type NoteInput } from "./notes";
 import { createRuleStore, type RuleExportRow } from "./rules";
 
 export interface Reply {
@@ -21,54 +13,14 @@ export interface Counts {
   allRules: number;
 }
 
-type NoteRow = ReturnType<typeof noteRow>;
-type RuleRow = ReturnType<typeof ruleRow>;
-
 export interface ExportReply {
   notes: NoteRow[];
   rules: RuleRow[];
   counts: Counts;
 }
 
-const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS notes (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    text   TEXT NOT NULL,
-    tags   TEXT NOT NULL DEFAULT '',
-    at     TEXT NOT NULL,
-    dkey   TEXT UNIQUE
-  )`,
-  `CREATE VIRTUAL TABLE IF NOT EXISTS notes_ft USING fts5(text, tags, content='notes', content_rowid='rowid')`,
-  `CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
-    INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
-    INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-    INSERT INTO notes_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-    INSERT INTO notes_ft(notes_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-  END`,
-  `CREATE TABLE IF NOT EXISTS rules (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    text   TEXT NOT NULL,
-    tags   TEXT NOT NULL,
-    at     TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1,
-    dkey   TEXT UNIQUE
-  )`,
-  `CREATE VIRTUAL TABLE IF NOT EXISTS rules_ft USING fts5(text, tags, content='rules', content_rowid='rowid')`,
-  `CREATE TRIGGER IF NOT EXISTS rules_ai AFTER INSERT ON rules BEGIN
-    INSERT INTO rules_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS rules_au AFTER UPDATE ON rules BEGIN
-    INSERT INTO rules_ft(rules_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-    INSERT INTO rules_ft(rowid, text, tags) VALUES (new.rowid, new.text, new.tags);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS rules_ad AFTER DELETE ON rules BEGIN
-    INSERT INTO rules_ft(rules_ft, rowid, text, tags) VALUES ('delete', old.rowid, old.text, old.tags);
-  END`,
-];
+type NoteRow = ReturnType<typeof noteRow>;
+type RuleRow = ReturnType<typeof ruleRow>;
 
 const NOTES_HEADER = "notes";
 const RULES_HEADER = "rules";
@@ -85,11 +37,12 @@ const wholeNumberFrom = (value: string | undefined, fallback: number) => {
 
 export const maxNoteFrom = (env: Env) => wholeNumberFrom(env.MAX_NOTE, 300);
 
-const noteRow = (row: NoteExportRow) => ({
+const noteRow = (row: { id: number; text: string; tags: string; storedAt: string; dkey: string | null }) => ({
   id: row.id,
   text: row.text,
   tags: row.tags,
   storedAt: row.storedAt,
+  dkey: row.dkey,
 });
 
 const ruleRow = (row: RuleExportRow) => ({
@@ -98,89 +51,51 @@ const ruleRow = (row: RuleExportRow) => ({
   tags: row.tags,
   storedAt: row.storedAt,
   active: row.active === 1,
+  dkey: row.dkey,
 });
 
-export class Brain extends DurableObject<Env> {
-  private notes;
-  private rules;
+export function createBrain(db: D1Database, maxNote: number) {
+  const port = createD1Port(db);
+  const notes = createNoteStore(port, maxNote);
+  const rules = createRuleStore(port);
 
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    const port: SqlPort = {
-      sql: <T extends SqlRow>(statement: string, values?: readonly SqlValue[]) =>
-        [...this.ctx.storage.sql.exec<T>(statement, ...(values ?? []))],
-      transaction: (run) => this.ctx.storage.transactionSync(run),
-      digest: async (parts) => {
-        const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("\u0000")));
-        return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      },
-    };
-
-    this.notes = createNoteStore(port, maxNoteFrom(env));
-    this.rules = createRuleStore(port);
-    this.ensureSchema();
-  }
-
-  private ensureSchema(): void {
-    const built = new Set(
-      [
-        ...this.ctx.storage.sql.exec<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE name IN ('notes', 'rules')",
-        ),
-      ].map((row) => row.name),
-    );
-    if (built.has("notes") && built.has("rules")) return;
-    for (const statement of SCHEMA) this.ctx.storage.sql.exec(statement);
-  }
-
-  private async answer(build: () => string | Promise<string>): Promise<Reply> {
+  const answer = async (build: () => string | Promise<string>): Promise<Reply> => {
     try {
       return { text: await build(), failed: false };
     } catch (error) {
       return { text: error instanceof Error ? error.message : String(error), failed: true };
     }
-  }
+  };
 
-  async recall(query: string, limit: number): Promise<Reply> {
-    return this.answer(() => {
-      const notes = this.notes.recall(query, limit);
-      const matched = this.rules.match(query);
-      if (notes.length === 0 && matched.length === 0) return noMatchLine(query);
-      const parts: string[] = [];
-      if (notes.length > 0) parts.push(`${NOTES_HEADER}\n${notes.join("\n")}`);
-      if (matched.length > 0) parts.push(`${RULES_HEADER}\n${matched.join("\n")}\n\n${AUTHORITY}`);
-      return parts.join("\n\n");
-    });
-  }
+  return {
+    recall: (query: string, limit: number) =>
+      answer(async () => {
+        const found = await notes.recall(query, limit);
+        const matched = await rules.match(query);
+        if (found.length === 0 && matched.length === 0) return noMatchLine(query);
+        const parts: string[] = [];
+        if (found.length > 0) parts.push(`${NOTES_HEADER}\n${found.join("\n")}`);
+        if (matched.length > 0) parts.push(`${RULES_HEADER}\n${matched.join("\n")}\n\n${AUTHORITY}`);
+        return parts.join("\n\n");
+      }),
 
-  async remember(items: NoteInput[]): Promise<Reply> {
-    return this.answer(() => this.notes.remember(items));
-  }
+    remember: (items: NoteInput[]) => answer(() => notes.remember(items)),
+    patch: (id: number, confirm: string, text: string) => answer(() => notes.patch(id, confirm, text)),
+    forget: (id: number, confirm: string) => answer(() => notes.forget(id, confirm)),
+    learn: (text: string, tags: string) => answer(() => rules.learn(text, tags)),
+    unlearn: (id: number, confirm: string) => answer(() => rules.unlearn(id, confirm)),
 
-  async patch(id: number, confirm: string, text: string): Promise<Reply> {
-    return this.answer(() => this.notes.patch(id, confirm, text));
-  }
-
-  async forget(id: number, confirm: string): Promise<Reply> {
-    return this.answer(() => this.notes.forget(id, confirm));
-  }
-
-  async learn(text: string, tags: string): Promise<Reply> {
-    return this.answer(() => this.rules.learn(text, tags));
-  }
-
-  async unlearn(id: number, confirm: string): Promise<Reply> {
-    return this.answer(() => this.rules.unlearn(id, confirm));
-  }
-
-  async export(): Promise<ExportReply> {
-    const notes = this.notes.allNotes();
-    const rules = this.rules.allRules();
-    const active = rules.filter((row) => row.active === 1).length;
-    return {
-      notes: notes.map(noteRow),
-      rules: rules.map(ruleRow),
-      counts: { notes: notes.length, activeRules: active, allRules: rules.length },
-    };
-  }
+    export: async (): Promise<ExportReply> => {
+      const stored = await notes.allNotes();
+      const saved = await rules.allRules();
+      const active = saved.filter((row) => row.active === 1).length;
+      return {
+        notes: stored.map(noteRow),
+        rules: saved.map(ruleRow),
+        counts: { notes: stored.length, activeRules: active, allRules: saved.length },
+      };
+    },
+  };
 }
+
+export type BrainHandle = ReturnType<typeof createBrain>;

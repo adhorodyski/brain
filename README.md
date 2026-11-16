@@ -19,7 +19,7 @@ Brain is the store they all read and write. Say the garage code once, and the ne
 the editor on your other machine all have it.
 
 ```
-pi / Codex / Cursor / Claude Code  ──MCP──▶  one Worker  ──▶  one Durable Object
+pi / Codex / Cursor / Claude Code  ──MCP──▶  one Worker  ──▶  one D1 database
                                                               SQLite: notes + rules
 ```
 
@@ -147,13 +147,20 @@ email to test as someone else, delete the block to test the refusal. Put `BRAIN_
 `.dev.vars` (the example file has both), then:
 
 ```sh
-npm run dev                 # local, http://localhost:8787/mcp
-npm run check               # tsc --noEmit
+npx wrangler d1 create brain          # once, then put the id in wrangler.jsonc
+npm run dev                           # local, http://localhost:8787/mcp
+npm run check                         # tsc --noEmit
 npx wrangler deploy --dry-run
-npx wrangler deploy         # https://<worker>.workers.dev/mcp
+npm run migrate                       # apply pending migrations to the real database
+npx wrangler deploy                   # https://<worker>.workers.dev/mcp
 ```
 
-Local rows live in `.wrangler/state`, so a deploy starts empty.
+`npm run dev` applies `migrations/` to the local copy first, so a fresh clone answers writes immediately.
+Apply to the real database with `npm run migrate` before you deploy: a migration is a committed `.sql` file,
+reviewed in the pull request and run by you, so the schema is never behind the code that expects it. D1 keeps
+30 days of history on paid plans, which is the undo for a migration that stored the wrong thing.
+
+Local rows live in `.wrangler/state`. The deployed rows live in the D1 database named in `wrangler.jsonc`.
 
 `BRAIN_HOSTNAME` must name the hostname you serve, and the `workers.dev` URL counts as one. The host check
 only allows `localhost` without it, so a deploy that skips this answers every `tools/list` with 403
@@ -174,11 +181,16 @@ only allows `localhost` without it, so a deploy that skips this answers every `t
 | `brain_forget` | `id`, `confirm: string` copied from that note | `forgot #7` |
 | `brain_learn` | `text`, `tags: string of words a search will use` | `stored · 5 of 13 · superseded r#3` |
 | `brain_unlearn` | `id` without the `r`, `confirm: string` copied from that rule | `retired · 3 of 12` |
-| `brain_export` | none | Every note and rule, retired rows included, as JSON |
+| `brain_export` | none | Every note and rule, retired rows included, as JSON, ids and dedupe keys attached |
 
 Search runs on SQLite FTS5 with `bm25()`, and notes and rules are two queries with their own limits, never
 one merged ranking, because short rules would outscore long notes. An empty `brain_recall` is final, so a
 host asks you instead of dumping every row into the conversation; `brain_export` is for backups and audits.
+
+`brain_export` carries each row's id, timestamp and dedupe key, so its output is a restore: hand it to
+`node tools/export-to-migration.mjs export.json` and apply the result as a migration. Rows come back with the
+numbers they had, retired rules stay retired, and a write repeated after the restore still reports
+`again, same call`.
 
 ### Caps
 

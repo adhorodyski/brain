@@ -5,7 +5,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "migrate:local": "wrangler d1 migrations apply brain --local",
+    "dev": "npm run migrate:local && wrangler dev",
+    "migrate": "wrangler d1 migrations apply brain --remote",
     "deploy": "wrangler deploy",
     "check": "tsc --noEmit"
   },

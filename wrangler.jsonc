@@ -10,8 +10,11 @@
       "identity": { "email": "you@example.com" }
     }
   },
-  "durable_objects": {
-    "bindings": [{ "name": "Brain", "class_name": "Brain" }]
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Brain"] }]
+  "d1_databases": [
+    {
+      "binding": "BRAIN_DB",
+      "database_name": "brain",
+      "database_id": "fb4a4e60-7f7c-49ad-92b4-2384aa8163d5"
+    }
+  ]
 }
