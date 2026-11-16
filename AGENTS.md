@@ -138,6 +138,11 @@ Each of these has a plausible-looking edit that breaks it quietly.
   and re-learning a rule that supersede retired hits the dedupe check before the supersede loop: the answer is
   `stored · again, same call` and the rule stays retired. That line there is the bug, not a healthy retry.
 
+- **`migrations/*_import.sql` is gitignored on purpose**, and it is the one migration file that must stay
+  that way: an import generated from `brain_export` is the owner's whole memory in plain text, and this repo is
+  public. Wrangler reads the directory from disk, so ignoring costs nothing. A committed `INSERT INTO notes`
+  of anyone's real note is not a fixture; generate one if a test needs rows.
+
 ## Checks
 
 ```sh

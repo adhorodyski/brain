@@ -187,10 +187,14 @@ Search runs on SQLite FTS5 with `bm25()`, and notes and rules are two queries wi
 one merged ranking, because short rules would outscore long notes. An empty `brain_recall` is final, so a
 host asks you instead of dumping every row into the conversation; `brain_export` is for backups and audits.
 
-`brain_export` carries each row's id, timestamp and dedupe key, so its output is a restore: hand it to
-`node tools/export-to-migration.mjs export.json` and apply the result as a migration. Rows come back with the
-numbers they had, retired rules stay retired, and a write repeated after the restore still reports
-`again, same call`.
+`brain_export` carries each row's id and timestamp, so its output is a restore: save it as `export.json`, run
+`node tools/export-to-migration.mjs export.json > migrations/0002_import.sql`, apply it. Rows come back with
+the numbers they had, retired rules stay retired, and a write repeated after the restore still reports
+`again, same call`. That is how you move an existing brain between storages without invalidating the `#id` and
+`r#id` your agents are holding.
+
+Name that file `*_import.sql`: git ignores it, because your notes are your garage code and your family's
+names, and this repo is public. `wrangler` reads migrations from disk, so it still applies.
 
 ### Caps
 

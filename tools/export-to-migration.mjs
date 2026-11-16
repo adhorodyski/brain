@@ -5,6 +5,7 @@ if (!input) {
   console.error(
     "usage: node tools/export-to-migration.mjs export.json > migrations/0002_import.sql\n" +
       "  export.json is the structuredContent from a brain_export tool result.\n" +
+      "  Name the output *_import.sql: it holds your real notes, and this repo is public.\n" +
       "  --keep-keys imports the exported dedupe keys instead of deriving them from the text.",
   );
   process.exit(1);
