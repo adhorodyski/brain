@@ -15,6 +15,7 @@ nothing else.
 | `src/rules.ts` | Rule rows: the rule-length and content caps, the required tags, supersede by identical wording, the matching query, and the authority paragraph |
 | `migrations/NNNN_name.sql` | The shape of the database, one committed file per change. Applied by `npm run migrate` |
 | `tools/export-to-migration.mjs` | Turns a `brain_export` file into an import migration that restores ids, timestamps, retirement and dedupe keys |
+| `src/retired-brain.ts` | The inert `Brain` class the platform requires while the pre-D1 Durable Object archive still exists; nothing routes to it |
 | `src/env.d.ts` | `Env` |
 
 ## Rules
@@ -52,6 +53,16 @@ Each of these has a plausible-looking edit that breaks it quietly.
   carry the old ones, and `d1_migrations` plus 30 days of history is the undo for either.
   This is also why an export from a build that predates `dkey` is a complete migration and not a lossy one:
   both shapes generate the same SQL.
+
+- **`durable_objects` and `migrations` in `wrangler.jsonc`, and `src/retired-brain.ts`, are not dead
+  configuration.** They exist only because the Durable Object written before the move to D1 still holds its
+  rows. Cloudflare refuses a deploy whose script stops exporting a class its live objects depend on: measured,
+  `npx wrangler deploy` on the config without them failed with `New version of script does not export class
+  'Brain' which is depended on by existing Durable Objects` and code `10064`, and nothing was deployed. So
+  deleting the binding, the `migrations` array or the stub class before the archive is retired does not tidy
+  anything up — it blocks the deploy entirely. Removing the archive is its own deliberate change: a
+  `deleted_classes` migration, which permanently destroys those rows, only after you have confirmed D1 is
+  serving and you no longer want the Durable Object as a rollback.
 
 - A migration that touches the search index has to drop and rebuild it, and **`DROP TABLE notes_ft` does not
   drop `notes_ai`, `notes_au` or `notes_ad`, because those triggers are declared `ON notes`.** Drop the

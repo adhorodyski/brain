@@ -5,6 +5,9 @@ import {
 } from "@modelcontextprotocol/server";
 import { createBrain, maxNoteFrom } from "./brain";
 import { brainServer } from "./mcp";
+import { Brain } from "./retired-brain";
+
+export { Brain };
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
