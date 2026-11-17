@@ -3,12 +3,8 @@ import {
   hostHeaderValidationResponse,
   localhostAllowedHostnames,
 } from "@modelcontextprotocol/server";
-import { Brain, maxNoteFrom } from "./brain";
+import { createBrain, maxNoteFrom } from "./brain";
 import { brainServer } from "./mcp";
-
-export { Brain };
-
-const BRAIN_ID = "brain";
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
@@ -29,7 +25,7 @@ export default {
     const refused = hostHeaderValidationResponse(request, allowed);
     if (refused) return refused;
 
-    const brain = env.Brain.get(env.Brain.idFromName(BRAIN_ID));
+    const brain = createBrain(env.BRAIN_DB, maxNoteFrom(env));
     const handler = createMcpHandler(() => brainServer(brain, maxNoteFrom(env)), {
       onerror: (error) => console.error("mcp:", error.message),
     });
