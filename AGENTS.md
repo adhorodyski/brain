@@ -162,21 +162,13 @@ npm run migrate                     # against the real database, after reviewing
 npx wrangler deploy --dry-run
 ```
 
-`tools-run-check.sh` and `tools-protocol-check.mjs` are **not in this repository** — they are the owner's local
-suites, listed in `.git/info/exclude`, which is per-clone and unversioned. Everything below describes them for
-whoever has them; a fresh clone has only `npm run check` and must not assume these commands exist.
+There is **no test suite in this repository** and none is planned. Verify with the commands above, plus by
+hand: drive the tools over MCP against a fresh `npm run dev` — which applies `migrations/` first, so the
+schema you exercise is the schema a deploy gets — and use `curl` for the non-tool paths: with the
+`access.dev` block removed `/mcp` gives 403 `Access required` and not 500; against the deployed Worker, an
+unauthenticated `/mcp` gives 401 with `WWW-Authenticate` from Access, not from this Worker.
 
-Each suite runs against its own fresh `wrangler dev` with `migrations/` applied first, so the schema a test
-exercises is the schema a deploy gets. `behaviour` (38) is the whole tool contract; `schema` (6) proves a
-migrated database answers both indexes; `guards` (16) proves a refused write stays refused; then `caps`,
-`fractional`, `tiebreak`. `tagscan` carries one known failure inherited from before the move to D1 and it is
-still a real failure, not a pass to be written off.
-
-Then by hand, with `curl` for the non-tool paths: with the `access.dev` block removed `/mcp` gives 403
-`Access required` and not 500; against the deployed Worker, an unauthenticated `/mcp` gives 401 with
-`WWW-Authenticate` from Access, not from this Worker.
-
-Two of these have no plausible-looking edit that keeps them passing, because both fail silently.
+Two of these checks have no plausible-looking edit that keeps them passing, because both fail silently.
 
 **A widening migration must be proved against a database that already holds rows.** Seed a `rules` table whose
 `rules_ft` indexes only `text` and `tags`, put a row in it, then apply the file that adds a column and widens
@@ -202,9 +194,9 @@ Supersede gets its own three-write check, because the failure is silent and the 
 Store three rules with different wording that all carry the tag `coding`: all three must come back from a
 `coding` query. Then store the first rule's exact wording with different tags: it must answer
 `superseded r#1` and leave the other two unretired. A shared-tag rule leaves you with one rule and no
-error, which is the bug and not a policy. `behaviour` runs all of it, and adds the batch cases: a three-item
-`brain_remember` with a dupe in the middle stores the two new notes, names the row that already holds the
-middle one, and adds no fourth row to the export.
+error, which is the bug and not a policy. Run the batch cases too: a three-item `brain_remember` with a dupe
+in the middle stores the two new notes, names the row that already holds the middle one, and adds no fourth
+row to the export.
 
 Then ask `pi`, over ~15 runs, for a note that
 was never stored: it answers "I don't know", takes 0-2 recalls, and `brain_export` fires in about one run of
