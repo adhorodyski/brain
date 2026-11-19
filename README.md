@@ -199,7 +199,7 @@ names, and this repo is public. `wrangler` reads migrations from disk, so it sti
 ### Caps
 
 `MAX_NOTE` (300) caps one note; a write over the cap throws and names the overage, and nothing truncates.
-`learn` caps a rule at `MAX_RULE` characters and refuses one carrying a link, an email or a code fence,
+`learn` caps a rule at 200 characters, fixed in `src/rules.ts` rather than configured, and refuses one carrying a link, an email or a code fence,
 because a rule should state behaviour and not point somewhere else. Notes and rules are otherwise uncapped:
 both cost tokens only on the turns that retrieve them.
 
