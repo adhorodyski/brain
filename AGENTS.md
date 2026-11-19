@@ -162,11 +162,15 @@ npm run migrate                     # against the real database, after reviewing
 npx wrangler deploy --dry-run
 ```
 
-The suites are `./tools-run-check.sh <name>`, each against its own fresh `wrangler dev` with `migrations/`
-applied first, so the schema a test exercises is the schema a deploy gets. `behaviour` (38) is the whole
-tool contract; `schema` (6) proves a migrated database answers both indexes; `guards` (16) proves a refused
-write stays refused; then `caps`, `fractional`, `tiebreak`. `tagscan` carries one known failure inherited from
-before the move to D1 and it is still a real failure, not a pass to be written off.
+`tools-run-check.sh` and `tools-protocol-check.mjs` are **not in this repository** — they are the owner's local
+suites, listed in `.git/info/exclude`, which is per-clone and unversioned. Everything below describes them for
+whoever has them; a fresh clone has only `npm run check` and must not assume these commands exist.
+
+Each suite runs against its own fresh `wrangler dev` with `migrations/` applied first, so the schema a test
+exercises is the schema a deploy gets. `behaviour` (38) is the whole tool contract; `schema` (6) proves a
+migrated database answers both indexes; `guards` (16) proves a refused write stays refused; then `caps`,
+`fractional`, `tiebreak`. `tagscan` carries one known failure inherited from before the move to D1 and it is
+still a real failure, not a pass to be written off.
 
 Then by hand, with `curl` for the non-tool paths: with the `access.dev` block removed `/mcp` gives 403
 `Access required` and not 500; against the deployed Worker, an unauthenticated `/mcp` gives 401 with
